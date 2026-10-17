@@ -10,3 +10,6 @@ state/
 # Google OAuth files (calendar feature)
 credentials.json
 token.json
+
+# Claude Code agent worktrees
+.claude/worktrees/
