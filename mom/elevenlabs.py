@@ -2,15 +2,6 @@
 
 import requests
 
-try:
-    # Verify HTTPS with the OS certificate store instead of certifi's bundle, so antivirus
-    # TLS scanning (e.g. Norton Web Shield) or corporate proxies don't break every request.
-    import truststore
-
-    truststore.inject_into_ssl()
-except ImportError:  # Python < 3.10, or not installed
-    pass
-
 API_BASE = "https://api.elevenlabs.io"
 DEFAULT_TIMEOUT_SECS = 30
 

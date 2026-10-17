@@ -9,27 +9,37 @@ Mom calls when a meeting is about to start or a deadline is coming up, using Goo
 
 ## Status
 
+**Milestone 1 (in progress): the daily briefing call.** Mom calls once a day, knows everything
+on today's calendar, and nags you about it.
+
 - [x] Stub trigger registered (never fires)
-- [ ] Google OAuth (desktop app flow), token cached locally in `token.json`
-- [ ] Fetch upcoming events (`events.list`, `timeMin=now`, `timeMax=now+lookahead`, `singleEvents=true`)
-- [ ] Fire for meetings starting within N minutes
-- [ ] Deadlines (see open questions)
-- [ ] ElevenLabs calendar agent created and prompt written
-- [ ] Tested with a real call
+- [x] Step 0: contract and scaffolding (`mom/calendar/` with `CalendarEvent`, `fake_events`, stubs; truststore moved to `mom/__init__.py`)
+- [ ] Step 1: Google OAuth (desktop app flow, `token.json`) and `fetch_todays_events`
+- [ ] Step 2: `summarize_events` formatting (`[done]` / `[now]` / `[next]` markers)
+- [ ] Step 3: ElevenLabs calendar agent and prompt (`docs/agents/calendar-agent.md`)
+- [ ] Step 4: briefing trigger at `CALENDAR_BRIEFING_TIME` and `python -m mom.calendar.brief`
+- [ ] Step 5: integration, tested with a real call
+
+Later milestones: a call N minutes before each meeting; deadlines (all-day events / Google Tasks).
 
 ## Agent prompt variables
 
-The variables `check()` sends, which the calendar agent's prompt must use:
+The variables the daily briefing sends, which the calendar agent's prompt must use:
 
 | Variable | Example | Meaning |
 |---|---|---|
 | `user_name` | `Jay` | added automatically by the caller |
-| `event_title` | `CSE 312 midterm` | (proposed) |
-| `minutes_until` | `15` | (proposed) |
+| `todays_events` | `2:30 PM-3:20 PM  CSE 312 midterm (Gates G20)  [next]` | one line per event, `[done]` / `[now]` / `[next]` markers |
+| `event_count` | `4` | number of events today |
+| `next_event` | `CSE 312 midterm at 2:30 PM (in 45 min)` | or `nothing else today` |
+| `current_time` | `10:05 AM, Friday October 17` | when the call is placed |
 
 ## Decisions
 
-- Dedup key: `calendar:<event_id>:<start_iso>`, so moving an event re-arms the call.
+- Daily briefing dedup key: `calendar:briefing:<YYYY-MM-DD>`, so it calls at most once per day.
+- Google Calendar REST API via `google-auth`'s `AuthorizedSession` (on `requests`, so truststore applies), scope `calendar.readonly`.
+- Settings: `CALENDAR_BRIEFING_TIME` (`HH:MM`), `CALENDAR_IDS` (comma-separated, or `all`).
+- Meeting reminders (later milestone) dedup key: `calendar:<event_id>:<start_iso>`, so moving an event re-arms the call.
 
 ## Open questions
 
