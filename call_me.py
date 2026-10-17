@@ -29,6 +29,11 @@ def main():
     args = parse_args()
     config = load_call_config()
     # Uses the default agent (ELEVENLABS_AGENT_ID), whose prompt expects these variables.
+    # Its first message is just {{opening_line}}; "none" means unknown to the prompt.
+    opening_line = (
+        f"{config['USER_NAME']}! {MINUTES_DISTRACTED} min on {args.distraction}?! "
+        f"Cousin Kevin would never. What are you stuck on with {args.goal}?"
+    )
     reason = CallReason(
         trigger="manual",
         dedup_key="manual",
@@ -36,6 +41,10 @@ def main():
             "goal": args.goal,
             "distraction": args.distraction,
             "minutes_distracted": MINUTES_DISTRACTED,
+            "call_type": "nudge",
+            "last_promise": "none",
+            "past_excuses": "none",
+            "opening_line": opening_line,
         },
         summary="manual test call",
     )

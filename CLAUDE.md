@@ -82,7 +82,7 @@ class CallReason:
 The agent prompt lives in the ElevenLabs dashboard, not in git. Each feature uses its **own agent**
 so prompt edits can't break the other feature:
 
-- `ELEVENLABS_AGENT_ID`: default agent (`call_me.py`, the screen prompt: `{{user_name}}`, `{{goal}}`, `{{distraction}}`, `{{minutes_distracted}}`)
+- `ELEVENLABS_AGENT_ID`: default agent (`call_me.py`, the screen prompt: `{{user_name}}`, `{{goal}}`, `{{distraction}}`, `{{minutes_distracted}}`, `{{call_type}}`, `{{last_promise}}`, `{{past_excuses}}`, `{{opening_line}}` = the whole first message)
 - `ELEVENLABS_AGENT_ID_SCREEN`, `ELEVENLABS_AGENT_ID_CALENDAR`: optional per-feature overrides
 
 Document which `{{variables}}` your agent's prompt expects in your feature doc. ElevenLabs rejects
