@@ -17,7 +17,7 @@ def tz():
 
 @pytest.fixture
 def now():
-    """Friday October 17, 10:05 AM, timezone-aware."""
+    """Saturday October 17 2026, 10:05 AM, timezone-aware."""
     return datetime(2026, 10, 17, 10, 5, tzinfo=PACIFIC)
 
 

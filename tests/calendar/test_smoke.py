@@ -1,11 +1,13 @@
 """Smoke test: every calendar module imports and the step 0 pieces fit together."""
 
 import importlib
+from datetime import timedelta
 
 import pytest
 
 from mom.calendar.briefing import build_briefing_reason
 from mom.calendar.events import CalendarEvent
+from mom.calendar.fake import fake_events
 from mom.calendar.summary import summarize_events
 
 MODULES = [
@@ -37,10 +39,25 @@ def test_fake_events_cover_the_day(events, now):
     assert all_day and all_day[0].start.hour == 0 and all_day[0].start.date() == now.date()
 
 
+@pytest.mark.parametrize("hour, minute", [(0, 10), (23, 50)])
+def test_fake_events_stay_on_today_near_midnight(now, hour, minute):
+    late = now.replace(hour=hour, minute=minute)
+    events = fake_events(late)
+    assert events == sorted(events, key=lambda event: event.start)
+    midnight = late.replace(hour=0, minute=0)
+    assert all(event.start < midnight + timedelta(days=1) and event.end > midnight for event in events)
+
+
+def test_fake_events_need_an_aware_now(now):
+    with pytest.raises(ValueError):
+        fake_events(now.replace(tzinfo=None))
+
+
 def test_summary_has_the_contract_keys(events, now):
     variables = summarize_events(events, now)
     assert set(variables) == {"todays_events", "event_count", "next_event", "current_time"}
     assert all(isinstance(value, str) for value in variables.values())
+    assert variables["current_time"] == "10:05 AM, Saturday October 17"
 
 
 def test_briefing_reason(events, now):

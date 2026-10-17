@@ -13,5 +13,5 @@ def build_briefing_reason(events: list[CalendarEvent], now: datetime) -> CallRea
         trigger="calendar",
         dedup_key=f"calendar:briefing:{now.date().isoformat()}",
         dynamic_variables=summarize_events(events, now),
-        summary=f"Daily briefing: {len(events)} events",
+        summary=f"Daily briefing: {len(events)} event{'' if len(events) == 1 else 's'}",
     )

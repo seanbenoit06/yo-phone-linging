@@ -9,21 +9,23 @@ def fake_events(now: datetime) -> list[CalendarEvent]:
     """A realistic day relative to now: done, in-progress, upcoming, all-day, overlapping.
 
     now must be timezone-aware. Times are rounded to 5 minutes so they read like real
-    events. Close to midnight the timed events can spill into yesterday or tomorrow.
+    events. Like fetch_todays_events, only events overlapping today are returned, sorted
+    by start, so close to midnight the day has fewer events.
     """
     if now.tzinfo is None:
         raise ValueError("fake_events needs a timezone-aware now, e.g. datetime.now().astimezone()")
     base = now.replace(minute=now.minute - now.minute % 5, second=0, microsecond=0)
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    next_midnight = midnight + timedelta(days=1)
 
     def at(minutes):
         return base + timedelta(minutes=minutes)
 
-    return [
+    events = [
         CalendarEvent(
             title="Problem set 3 due",
             start=midnight,
-            end=midnight + timedelta(days=1),
+            end=next_midnight,
             all_day=True,
             calendar="UW classes",
         ),
@@ -67,3 +69,5 @@ def fake_events(now: datetime) -> list[CalendarEvent]:
             location="Thai Tom",
         ),
     ]
+    todays = [event for event in events if event.start < next_midnight and event.end > midnight]
+    return sorted(todays, key=lambda event: event.start)
