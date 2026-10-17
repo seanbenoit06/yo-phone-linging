@@ -22,5 +22,8 @@ def summarize_events(events: list[CalendarEvent], now: datetime) -> dict[str, st
         "todays_events": "\n".join(event.title for event in events) or "(nothing on the calendar today)",
         "event_count": str(len(events)),
         "next_event": upcoming[0].title if upcoming else "nothing else today",
-        "current_time": now.isoformat(timespec="minutes"),
+        "current_time": (
+            f"{now.hour % 12 or 12}:{now.minute:02d} {'AM' if now.hour < 12 else 'PM'}, "
+            f"{now.strftime('%A %B')} {now.day}"
+        ),
     }
