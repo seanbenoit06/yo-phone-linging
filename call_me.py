@@ -9,18 +9,17 @@ Usage:
 import argparse
 import json
 import re
-import time
 
-from common import ApiError, api_request, fail, load_config
+from caller import (
+    RINGING_TIMEOUT_SECS,
+    CallError,
+    build_dynamic_variables,
+    place_call,
+    wait_for_call,
+)
+from common import ApiError, fail, load_config
 
-RINGING_TIMEOUT_SECS = 30
 MINUTES_DISTRACTED = "5"
-POLL_INTERVAL_SECS = 3
-MAX_WAIT_SECS = 15 * 60
-MAX_CONSECUTIVE_POLL_ERRORS = 10
-# The outbound-call request can stay open while the phone rings, so allow longer than ringing.
-CALL_REQUEST_TIMEOUT_SECS = RINGING_TIMEOUT_SECS + 60
-FINAL_STATUSES = {"done", "failed"}
 E164_PATTERN = re.compile(r"^\+[1-9]\d{7,14}$")
 
 DIDNT_RING_HINT = """
@@ -47,72 +46,14 @@ def mask_phone(number):
     return number[:2] + "•" * (len(number) - 6) + number[-4:]
 
 
-def place_call(config, goal, distraction):
-    body = {
-        "agent_id": config["ELEVENLABS_AGENT_ID"],
-        "agent_phone_number_id": config["ELEVENLABS_PHONE_NUMBER_ID"],
-        "to_number": config["MY_PHONE_NUMBER"],
-        "conversation_initiation_client_data": {
-            "dynamic_variables": {
-                "user_name": config["USER_NAME"],
-                "goal": goal,
-                "distraction": distraction,
-                "minutes_distracted": MINUTES_DISTRACTED,
-            },
-        },
-        "telephony_call_config": {"ringing_timeout_secs": RINGING_TIMEOUT_SECS},
-    }
-    return api_request(
-        "POST",
-        "/v1/convai/sip-trunk/outbound-call",
-        config["ELEVENLABS_API_KEY"],
-        timeout=CALL_REQUEST_TIMEOUT_SECS,
-        json=body,
-    )
+def print_api_response(response):
+    print("\nAPI response:")
+    print(json.dumps(response, indent=2, ensure_ascii=False))
 
 
-def wait_for_call_to_end(api_key, conversation_id):
-    """Poll the conversation until its status is done/failed, then return it."""
-    print(f"\n⏳ Waiting for the call to end (checking every {POLL_INTERVAL_SECS}s, Ctrl+C to stop)...")
-    started = time.monotonic()
-    last_status = None
-    consecutive_errors = 0
-    warned_still_ringing = False
-
-    while time.monotonic() - started < MAX_WAIT_SECS:
-        elapsed = time.monotonic() - started
-        try:
-            conversation = api_request("GET", f"/v1/convai/conversations/{conversation_id}", api_key)
-            consecutive_errors = 0
-        except ApiError as err:
-            # 404 right after placing the call (not created yet), rate limits, server and
-            # network hiccups are usually temporary, so retry a few times before giving up.
-            retryable = err.status_code in (None, 404, 429) or err.status_code >= 500
-            consecutive_errors += 1
-            if not retryable or consecutive_errors > MAX_CONSECUTIVE_POLL_ERRORS:
-                raise
-            time.sleep(POLL_INTERVAL_SECS)
-            continue
-
-        status = conversation.get("status")
-        if status != last_status:
-            note = "  (call ended, ElevenLabs is processing the transcript)" if status == "processing" else ""
-            print(f"   [{elapsed:4.0f}s] status: {status}{note}")
-            last_status = status
-
-        if status in FINAL_STATUSES:
-            return conversation
-
-        if status == "initiated" and not warned_still_ringing and elapsed > RINGING_TIMEOUT_SECS + 15:
-            print(DIDNT_RING_HINT)
-            warned_still_ringing = True
-
-        time.sleep(POLL_INTERVAL_SECS)
-
-    fail(
-        f"Gave up after {MAX_WAIT_SECS // 60} minutes; the call still hasn't finished.\n"
-        f"   Check it in ElevenLabs → Conversations: {conversation_id}"
-    )
+def print_status(status, elapsed):
+    note = "  (call ended, ElevenLabs is processing the transcript)" if status == "processing" else ""
+    print(f"   [{elapsed:4.0f}s] status: {status}{note}")
 
 
 def print_result(conversation):
@@ -167,38 +108,38 @@ def main():
         f"   goal={args.goal!r}  distraction={args.distraction!r}  "
         f"minutes_distracted={MINUTES_DISTRACTED!r}  ringing_timeout={RINGING_TIMEOUT_SECS}s"
     )
+    variables = build_dynamic_variables(config["USER_NAME"], args.goal, args.distraction, MINUTES_DISTRACTED)
 
     try:
-        response = place_call(config, args.goal, args.distraction)
+        response = place_call(config, config["MY_PHONE_NUMBER"], variables)
     except ApiError as err:
         if err.status_code is None:
             fail(f"{err}\n   The call may still have been placed. Check ElevenLabs → Conversations before retrying.")
         fail(str(err))
-
-    print("\nAPI response:")
-    print(json.dumps(response, indent=2, ensure_ascii=False))
-
-    if not response.get("success"):
+    except CallError as err:
+        if err.response is not None:
+            print_api_response(err.response)
         fail(
-            f"ElevenLabs did not place the call: {response.get('message')}\n"
+            f"{err}\n"
             "   • Check ELEVENLABS_AGENT_ID, ELEVENLABS_PHONE_NUMBER_ID and MY_PHONE_NUMBER in .env.\n"
             "   • Check the number's outbound SIP settings in ElevenLabs → Phone Numbers."
         )
 
-    conversation_id = response.get("conversation_id")
-    if not conversation_id:
-        fail("ElevenLabs said success but returned no conversation_id, so there's nothing to poll." + DIDNT_RING_HINT)
-
+    print_api_response(response)
+    conversation_id = response["conversation_id"]
     print(f"\n✅ Call placed. conversation_id: {conversation_id}")
     print(f"   Your phone should ring within a few seconds (it rings for up to {RINGING_TIMEOUT_SECS}s).")
+    print("\n⏳ Waiting for the call to end (Ctrl+C to stop)...")
 
     try:
-        conversation = wait_for_call_to_end(config["ELEVENLABS_API_KEY"], conversation_id)
+        conversation = wait_for_call(config["ELEVENLABS_API_KEY"], conversation_id, on_status=print_status)
     except KeyboardInterrupt:
         print(f"\nStopped waiting. The call may still be going. conversation_id: {conversation_id}")
         return
     except ApiError as err:
         fail(f"Couldn't read the conversation: {err}")
+    except CallError as err:
+        fail(f"{err}\n   conversation_id: {conversation_id}" + DIDNT_RING_HINT)
 
     print_result(conversation)
 

@@ -23,10 +23,18 @@ call_me.py → ElevenLabs API (sip-trunk/outbound-call) → Photon SIP trunk →
 - [x] Error messages: missing env vars, 401, 403, 404, 422, 429, 5xx, "phone didn't ring"
 - [x] First real call tested end to end
 
-### ⏭️ Phase 2: follow up by text after the call
-- [ ] Save the transcript (e.g. as JSON) for follow-ups
-- [ ] Have the agent text a follow-up based on the transcript (e.g. "You said you'd finish in 30 minutes. How's it going?")
+### 🔨 Phase 2: the full escalation loop (built in parallel, see `INTERFACES.md`)
+- [x] Core: `models.py`, `settings.py`, `caller.py`, `brain.py`, `main.py`
+- [x] Ladder: `?` text → nudge call → follow-up text quoting the promise → callback → snitch call to an opted-in friend
+- [x] "I'm actually working" → apologize and never flag that activity again this session
+- [ ] iMessage: `texter.py` + `intent.py` (Photon shared line)
+- [ ] Detector: `detector.py` (window / tab title + Gemini)
+- [ ] Agent prompt: `agent/` (nudge / callback / snitch flows, Data Collection fields)
+- [ ] Webcam: `webcam.py` (Perceptron, phone-in-hand)
+- [ ] End-to-end demo run with `DEMO_MODE=1`
 
 ### 💡 Later
-- [ ] Detect procrastination (e.g. the active app / website) and trigger `call_me.py` automatically
-- [ ] Compute `minutes_distracted` for real instead of hardcoding `"5"`
+- [ ] Persist excuses across runs (`memory.json`, maybe MLH Backboard)
+- [ ] Rehearse the demo, Devpost, make the repo public
+- [ ] VEYZL audit on a PR, GoDaddy domain
+- [ ] Roadmap only (pitch): Team Mode, Bet Mode, "Future You" voice, focus dashboard
