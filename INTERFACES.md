@@ -79,6 +79,7 @@ Dynamic variables sent on **every** call (missing values are sent as `"none"`):
 | `call_type` | `nudge` / `callback` / `snitch` |
 | `last_promise` | `open the hw PDF and read Q1` |
 | `past_excuses` | `I'm too tired; just five minutes` |
+| `opening_line` | Mom's first sentence, picked per `call_type` from `agent/opening_lines.json` (`{name}` placeholders). The dashboard First message is exactly `{{opening_line}}`. A callback with no `last_promise` uses the `nudge` line. |
 
 Data Collection fields `caller.to_call_result()` reads after each call (exact names):
 

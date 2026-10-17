@@ -4,7 +4,9 @@ Used by call_me.py (CLI) and main.py (the agent loop). Raises instead of exiting
 so one failed call never stops the loop.
 """
 
+import json
 import time
+from pathlib import Path
 
 from common import ApiError, api_request
 from models import CallResult, CallType
@@ -21,6 +23,21 @@ FINAL_STATUSES = {"done", "failed"}
 # Sent for variables with no value, so every {{variable}} in the agent prompt always resolves.
 EMPTY = "none"
 
+# Owned by the agent-prompt session. Read on every call so wording tweaks apply without a restart.
+OPENING_LINES_FILE = Path(__file__).resolve().parent / "agent" / "opening_lines.json"
+FALLBACK_OPENING_LINES = {
+    "nudge": "{user_name}! It's Mom. Why are you on {distraction} instead of doing {goal}?",
+    "callback": "{user_name}, it's Mom again. You promised me you would {last_promise}. Did you do it?",
+    "snitch": "Hi! This is Mom.exe, an AI accountability mom, calling about {user_name}.",
+}
+
+
+class _KeepMissing(dict):
+    """format_map helper: leave unknown {placeholders} as-is instead of raising."""
+
+    def __missing__(self, key):
+        return "{" + key + "}"
+
 
 class CallError(Exception):
     """ElevenLabs didn't place the call, or the call never finished.
@@ -36,7 +53,7 @@ class CallError(Exception):
 def build_dynamic_variables(user_name, goal, distraction, minutes_distracted,
                             call_type=CallType.NUDGE, last_promise=None, past_excuses=None):
     """Every {{variable}} the agent prompt may use. Always send all of them."""
-    return {
+    variables = {
         "user_name": user_name,
         "goal": goal or EMPTY,
         "distraction": distraction or EMPTY,
@@ -45,6 +62,20 @@ def build_dynamic_variables(user_name, goal, distraction, minutes_distracted,
         "last_promise": last_promise or EMPTY,
         "past_excuses": past_excuses or EMPTY,
     }
+    variables["opening_line"] = _opening_line(call_type, variables)
+    return variables
+
+
+def _opening_line(call_type, variables):
+    """First thing Mom says. The dashboard First message is exactly {{opening_line}}."""
+    key = call_type.value
+    if call_type == CallType.CALLBACK and variables["last_promise"] == EMPTY:
+        key = CallType.NUDGE.value  # the callback opener says the promise out loud
+    try:
+        lines = json.loads(OPENING_LINES_FILE.read_text())
+        return lines[key].format_map(_KeepMissing(variables))
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return FALLBACK_OPENING_LINES[key].format_map(variables)
 
 
 def place_call(config, to_number, variables):
@@ -125,17 +156,32 @@ def to_call_result(conversation, call_type):
         value = (collected.get(field_id) or {}).get("value")
         return str(value).strip() if value not in (None, "") else None
 
+    # A voicemail greeting shows up as a "user" turn, so it must not count as answered.
+    answered = any(turn.get("role") == "user" for turn in transcript) and not _hit_voicemail(conversation)
+
     return CallResult(
         conversation_id=conversation.get("conversation_id", ""),
         call_type=call_type,
         status=conversation.get("status", "failed"),
-        answered=any(turn.get("role") == "user" for turn in transcript),
+        answered=answered,
         duration_secs=int(metadata.get("call_duration_secs") or 0),
         transcript=transcript,
         summary=analysis.get("transcript_summary"),
         promised_step=collected_value("promised_step"),
         excuse=collected_value("excuse"),
     )
+
+
+def _hit_voicemail(conversation):
+    """True if the agent's voicemail_detection tool fired (or the call ended on voicemail)."""
+    reason = str((conversation.get("metadata") or {}).get("termination_reason") or "")
+    if "voicemail" in reason.lower():
+        return True
+    for turn in conversation.get("transcript") or []:
+        for tool_call in turn.get("tool_calls") or []:
+            if "voicemail" in json.dumps(tool_call).lower():
+                return True
+    return False
 
 
 def call(config, to_number, call_type, variables, on_status=None):
