@@ -1,15 +1,17 @@
-"""Shared helpers: load .env and call the ElevenLabs API with readable errors."""
-
-import os
-import sys
-from pathlib import Path
+"""Call the ElevenLabs API with readable errors."""
 
 import requests
-from dotenv import load_dotenv
+
+try:
+    # Verify HTTPS with the OS certificate store instead of certifi's bundle, so antivirus
+    # TLS scanning (e.g. Norton Web Shield) or corporate proxies don't break every request.
+    import truststore
+
+    truststore.inject_into_ssl()
+except ImportError:  # Python < 3.10, or not installed
+    pass
 
 API_BASE = "https://api.elevenlabs.io"
-PROJECT_DIR = Path(__file__).resolve().parent
-ENV_FILE = PROJECT_DIR / ".env"
 DEFAULT_TIMEOUT_SECS = 30
 
 
@@ -19,34 +21,6 @@ class ApiError(Exception):
     def __init__(self, status_code, message):
         super().__init__(message)
         self.status_code = status_code
-
-
-def fail(message):
-    print(f"\n❌ {message}", file=sys.stderr)
-    sys.exit(1)
-
-
-def load_config(required_keys):
-    """Return {key: value} for required_keys, or exit listing what's missing."""
-    load_dotenv(ENV_FILE)
-    config = {}
-    missing = []
-    for key in required_keys:
-        value = os.getenv(key, "").strip()
-        # Values still starting with "your_" were copied from .env.example unchanged.
-        if not value or value.startswith("your_"):
-            missing.append(key)
-        else:
-            config[key] = value
-
-    if missing:
-        lines = ["Missing environment variables:"]
-        lines += [f"   • {key}" for key in missing]
-        if not ENV_FILE.exists():
-            lines.append("   No .env file found. Create one with: cp .env.example .env")
-        lines.append(f"   Fill them in {ENV_FILE}")
-        fail("\n".join(lines))
-    return config
 
 
 def api_request(method, path, api_key, timeout=DEFAULT_TIMEOUT_SECS, **kwargs):
@@ -91,7 +65,7 @@ def describe_http_error(response):
     if status == 404:
         return (
             f"404 Not Found: {detail}\n"
-            "   • Check ELEVENLABS_AGENT_ID and ELEVENLABS_PHONE_NUMBER_ID in .env.\n"
+            "   • Check the ELEVENLABS_AGENT_ID* and ELEVENLABS_PHONE_NUMBER_ID values in .env.\n"
             "   • Run `python list_numbers.py` to see valid phone_number_id values."
         )
     if status == 422:
