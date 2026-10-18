@@ -212,11 +212,26 @@ FOCUS_DESCRIPTIONS = {
                   "(Discord, Slack, Messages) where the conversation isn't clearly about the goal or clearly fun.",
 }
 
-_INSTRUCTIONS = (
-    "Someone set a goal and is at their computer. From the app and window in front of them, "
-    "decide if they are working toward the goal or procrastinating.\n"
-    + "\n".join(f"- {focus.value}: {text}" for focus, text in FOCUS_DESCRIPTIONS.items())
-)
+# DETECTOR_MODE decides real work that isn't the goal: lockin calls it distracted, relaxed lets it slide.
+DETECTOR_MODES = {"lockin": Focus.DISTRACTED, "relaxed": Focus.UNSURE}
+_OTHER_WORK = "Also real work on something other than the goal (another project, a job tool, another class)."
+
+
+def _mode():
+    mode = os.getenv("DETECTOR_MODE", "lockin").strip().lower()
+    return mode if mode in DETECTOR_MODES else "lockin"
+
+
+def _focus_descriptions():
+    other_work = DETECTOR_MODES[_mode()]
+    return {focus: f"{text} {_OTHER_WORK}" if focus is other_work else text
+            for focus, text in FOCUS_DESCRIPTIONS.items()}
+
+
+def _instructions():
+    return ("Someone set a goal and is at their computer. From the app and window in front of them, "
+            "decide if they are working toward the goal or procrastinating.\n"
+            + "\n".join(f"- {focus.value}: {text}" for focus, text in _focus_descriptions().items()))
 
 _GEMINI_SCHEMA = {
     "type": "object",
@@ -232,7 +247,7 @@ _GEMINI_SCHEMA = {
     "required": ["focus", "distraction", "reason"],
 }
 
-_cache = {}  # (backend, goal, app, title, page) -> Verdict
+_cache = {}  # (backend, mode, goal, app, title, page) -> Verdict
 _pool = ThreadPoolExecutor(max_workers=4)
 
 
@@ -286,7 +301,7 @@ def _post(url, headers, body):
 
 
 def _ask_gemini(activity, goal, image=None):
-    instructions = _INSTRUCTIONS
+    instructions = _instructions()
     parts = [{"text": _describe(activity, goal)}]
     if image:
         instructions += "\nA screenshot of the front window is attached. Judge mainly by what it shows."
@@ -317,7 +332,7 @@ def _ask_jev(activity, goal):
             "type": "choice",
             "name": "focus",
             "instructions": "Is this person working toward their goal or procrastinating?",
-            "choices": [{"value": focus.value, "description": text} for focus, text in FOCUS_DESCRIPTIONS.items()],
+            "choices": [{"value": focus.value, "description": text} for focus, text in _focus_descriptions().items()],
         }],
     })
     answer = data["answers"][0]
@@ -344,7 +359,7 @@ def _ask_and_cache(backend, activity, goal, key):
     return verdict
 
 
-_screen_cache = {}  # (goal, app, title, page) -> (Verdict, monotonic time it was made)
+_screen_cache = {}  # (mode, goal, app, title, page) -> (Verdict, monotonic time it was made)
 
 
 def _ask_screen_and_cache(activity, goal, key):
@@ -359,7 +374,7 @@ def _wait(future, deadline):
 
 def _look_at_screen(activity, goal, verdict, deadline):
     """Second opinion from a screenshot when the title alone was unclear. Gemini only."""
-    key = (goal, activity.app, activity.title, _page(activity))
+    key = (_mode(), goal, activity.app, activity.title, _page(activity))
     seen = _screen_cache.get(key)
     if seen and time.monotonic() - seen[1] < VISION_REUSE_SECS:
         return seen[0]
@@ -381,7 +396,7 @@ def _classify_with(activity, goal, backend, vision=False):
             return verdict
         if backend not in _ASK:
             return Verdict(Focus.UNSURE, reason=f"unknown DETECTOR_LLM {backend!r}, use gemini or jev")
-        key = (backend, goal, activity.app, activity.title, _page(activity))
+        key = (backend, _mode(), goal, activity.app, activity.title, _page(activity))
         verdict = _cache.get(key) or _wait(_pool.submit(_ask_and_cache, backend, activity, goal, key), deadline)
         if vision and verdict.focus is Focus.UNSURE:
             verdict = _look_at_screen(activity, goal, verdict, deadline)
@@ -409,12 +424,16 @@ def main():
     parser.add_argument("--every", type=float, default=3, help="seconds between checks (default 3)")
     parser.add_argument("--vision", action="store_true", default=os.getenv("DETECTOR_VISION", "0").strip() == "1",
                         help="screenshot the front window when the title is unclear (default: DETECTOR_VISION)")
+    parser.add_argument("--mode", choices=list(DETECTOR_MODES), default=_mode(),
+                        help="lockin: other real work counts as distracted; relaxed: it doesn't "
+                             "(default: DETECTOR_MODE or lockin)")
     args = parser.parse_args()
+    os.environ["DETECTOR_MODE"] = args.mode  # classify() reads the mode from the environment
     backends = LLM_BACKENDS if args.llm == "both" else (args.llm,)
     sys.stdout.reconfigure(line_buffering=True)  # show each check right away, even when piped
 
-    print(f"Goal: {args.goal} | LLM: {', '.join(backends)} | screenshots: {'on' if args.vision else 'off'} | "
-          f"checking every {args.every:g}s. Ctrl+C to stop.\n")
+    print(f"Goal: {args.goal} | mode: {args.mode} | LLM: {', '.join(backends)} | "
+          f"screenshots: {'on' if args.vision else 'off'} | checking every {args.every:g}s. Ctrl+C to stop.\n")
     try:
         while True:
             stamp = datetime.now().strftime("%H:%M:%S")

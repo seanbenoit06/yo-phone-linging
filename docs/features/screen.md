@@ -9,9 +9,10 @@ The `mom/triggers/screen.py` stub stays unused. See `INTERFACES.md`.
 - Feature code: `detector.py` (macOS: `osascript` for the frontmost app and the browser tab)
 - Agent: the default agent (`ELEVENLABS_AGENT_ID`), set up per `agent/SETUP.md`
 - Run: `python detector.py "CSE homework"` (detector alone) or `python main.py` (whole app).
-  Flags: `--llm gemini|jev|both` to compare models, `--vision` to turn on screenshots.
+  Flags: `--llm gemini|jev|both` to compare models, `--vision` to turn on screenshots,
+  `--mode lockin|relaxed`.
 - Config (`.env`): `GEMINI_API_KEY`, `AI_GATEWAY_API_KEY` (only for Jev), `DETECTOR_LLM=gemini|jev`,
-  `DETECTOR_VISION=0|1`
+  `DETECTOR_VISION=0|1`, `DETECTOR_MODE=lockin|relaxed`
 - macOS permissions for the terminal app running Python: Accessibility (window titles),
   Automation → each browser (tab title + URL), Screen & System Audio Recording (only with `DETECTOR_VISION=1`)
 
@@ -62,8 +63,15 @@ All from 2026-10-17.
 - **URLs lose their `?query` and `#fragment`** before they reach the LLM or the cache key. Those parts
   hold record IDs and sometimes tokens. Keeping them made every CRM record a new cache entry, and the
   verdict flip-flopped between on_task and distracted on the same site.
+- **Two modes for real work that isn't the goal** (a job CRM, another project, another class).
+  `lockin` (default, Jay's pick: "more like an Asian mom") counts it as DISTRACTED. `relaxed` makes
+  it UNSURE, so Mom stays quiet. Gemini follows the mode (CRM, sales spreadsheet: distracted vs
+  unsure). Jev mostly ignores it, which is another reason Gemini is the default.
 
 ## Open questions
+
+- Pick the mode per session by text (e.g. "lock in: CSE homework") instead of `.env`. Needs a
+  `mode` on `Intent` in `models.py`, plus `intent.py` and `brain.py` changes, so it has to be agreed with their owners.
 
 - Must work on both macOS and Windows (see "Cross-platform" in CLAUDE.md). macOS uses `osascript`,
   `screencapture` and `sips` (built in, no packages). Windows would need `pywin32` / `psutil` for the
