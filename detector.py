@@ -3,17 +3,20 @@
 get_activity() reads the frontmost app and window title (the active tab's title and URL
 for browsers) with osascript. classify() flags obvious distraction sites by rule and asks
 an LLM about everything else (Gemini by default, Jev with DETECTOR_LLM=jev), caching each
-answer per title.
+answer per title. With DETECTOR_VISION=1, titles the LLM is unsure about get a second look:
+a screenshot of the front window goes to Gemini, and is deleted right after.
 
-Manual test: python detector.py "CSE homework"   (then switch windows and watch)
+Manual test: python detector.py "CSE homework" [--vision]   (then switch windows and watch)
 """
 
 import argparse
+import base64
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from datetime import datetime
@@ -36,6 +39,10 @@ JEV_MODEL = "typesafe-ai/jev"
 JEV_URL = "https://ai-gateway.vercel.sh/v1/decisions"  # Vercel AI Gateway, OpenAI-compatible Decisions API
 JEV_MIN_CONFIDENCE = 0.6  # Jev picks below this confidence become UNSURE
 LLM_BACKENDS = ("gemini", "jev")
+
+VISION_MIN_SECS = 2.5     # don't start a screenshot check with less time than this left
+VISION_REUSE_SECS = 30    # reuse a screenshot verdict for the same window this long
+SCREENSHOT_MAX_PX = 1024  # longest side of the image sent to Gemini
 
 
 # ---------- get_activity ----------
@@ -120,6 +127,9 @@ def _permission_hint(error, target):
 
 def get_activity():
     """Frontmost app and window title (tab title + URL for browsers). None if macOS blocks us."""
+    if sys.platform != "darwin":
+        _warn_once("reading the active window only works on macOS so far.")
+        return None
     target = "System Events"
     try:
         process, _, app = _osascript(_FRONT_APP).partition("\n")
@@ -136,6 +146,40 @@ def get_activity():
     except RuntimeError as error:
         _warn_once(_permission_hint(str(error), target))
     return None
+
+
+# ---------- screenshot (DETECTOR_VISION=1) ----------
+
+_FRONT_WINDOW_BOUNDS = """
+tell application "System Events"
+    tell (first application process whose frontmost is true)
+        set {x, y} to position of front window
+        set {w, h} to size of front window
+    end tell
+end tell
+return (x as text) & "," & (y as text) & "," & (w as text) & "," & (h as text)
+"""
+
+
+def _screenshot_front_window():
+    """JPEG bytes of the front window only, shrunk for upload. Never kept on disk."""
+    bounds = _osascript(_FRONT_WINDOW_BOUNDS)
+    fd, path = tempfile.mkstemp(suffix=".jpg")
+    os.close(fd)
+    try:
+        shot = subprocess.run(["screencapture", "-x", "-t", "jpg", "-R", bounds, path],
+                              capture_output=True, text=True, timeout=OSASCRIPT_TIMEOUT_SECS)
+        if shot.returncode != 0:
+            _warn_once("macOS blocked the screenshot. Open System Settings → Privacy & Security → "
+                       "Screen & System Audio Recording, turn on the terminal app running Python, "
+                       "then restart that terminal.")
+            raise RuntimeError("screenshot blocked, needs Screen Recording permission")
+        subprocess.run(["sips", "-Z", str(SCREENSHOT_MAX_PX), "-s", "formatOptions", "60", path],
+                       capture_output=True, check=True, timeout=OSASCRIPT_TIMEOUT_SECS)
+        with open(path, "rb") as f:
+            return f.read()
+    finally:
+        os.remove(path)
 
 
 # ---------- classify ----------
@@ -180,15 +224,15 @@ _GEMINI_SCHEMA = {
         "focus": {"type": "string", "enum": [focus.value for focus in Focus]},
         "distraction": {
             "type": "string",
-            "description": "If distracted: short name of the app or site to say out loud, "
-                           "like TikTok, Netflix or Amazon. Otherwise empty.",
+            "description": "If distracted: short name of the app or website (not what's on it) to say "
+                           "out loud, like TikTok, Netflix, Amazon or Discord. Otherwise empty.",
         },
         "reason": {"type": "string", "description": "One short sentence."},
     },
     "required": ["focus", "distraction", "reason"],
 }
 
-_cache = {}  # (backend, goal, app, title, url) -> Verdict
+_cache = {}  # (backend, goal, app, title, page) -> Verdict
 _pool = ThreadPoolExecutor(max_workers=4)
 
 
@@ -219,10 +263,18 @@ def _short_name(activity):
     return parts[-2].capitalize() if len(parts) >= 2 else activity.app
 
 
+def _page(activity):
+    """Tab URL without ?query or #fragment: they hold IDs and tokens, and would split the cache."""
+    if not activity.url:
+        return None
+    url = urlparse(activity.url)
+    return f"{url.hostname}{url.path}" if url.hostname else activity.url.split("?")[0].split("#")[0]
+
+
 def _describe(activity, goal):
     lines = [f"Goal: {goal}", f"App: {activity.app}", f"Window title: {activity.title or '(none)'}"]
     if activity.url:
-        lines.append(f"URL: {activity.url[:300]}")
+        lines.append(f"URL: {_page(activity)[:300]}")
     return "\n".join(lines)
 
 
@@ -233,10 +285,15 @@ def _post(url, headers, body):
     return response.json()
 
 
-def _ask_gemini(activity, goal):
+def _ask_gemini(activity, goal, image=None):
+    instructions = _INSTRUCTIONS
+    parts = [{"text": _describe(activity, goal)}]
+    if image:
+        instructions += "\nA screenshot of the front window is attached. Judge mainly by what it shows."
+        parts.append({"inlineData": {"mimeType": "image/jpeg", "data": base64.b64encode(image).decode()}})
     data = _post(GEMINI_URL, {"x-goog-api-key": _env_key("GEMINI_API_KEY")}, {
-        "systemInstruction": {"parts": [{"text": _INSTRUCTIONS}]},
-        "contents": [{"role": "user", "parts": [{"text": _describe(activity, goal)}]}],
+        "systemInstruction": {"parts": [{"text": instructions}]},
+        "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {
             "responseMimeType": "application/json",
             "responseJsonSchema": _GEMINI_SCHEMA,
@@ -248,7 +305,8 @@ def _ask_gemini(activity, goal):
     distraction = None
     if focus is Focus.DISTRACTED:
         distraction = answer.get("distraction", "").strip() or _short_name(activity)
-    return Verdict(focus, distraction=distraction, reason=f"gemini: {answer.get('reason', '')}")
+    source = "gemini+screenshot" if image else "gemini"
+    return Verdict(focus, distraction=distraction, reason=f"{source}: {answer.get('reason', '')}")
 
 
 def _ask_jev(activity, goal):
@@ -286,17 +344,48 @@ def _ask_and_cache(backend, activity, goal, key):
     return verdict
 
 
-def _classify_with(activity, goal, backend):
+_screen_cache = {}  # (goal, app, title, page) -> (Verdict, monotonic time it was made)
+
+
+def _ask_screen_and_cache(activity, goal, key):
+    verdict = _ask_gemini(activity, goal, image=_screenshot_front_window())
+    _screen_cache[key] = (verdict, time.monotonic())
+    return verdict
+
+
+def _wait(future, deadline):
+    return future.result(timeout=max(0.0, deadline - time.monotonic()))
+
+
+def _look_at_screen(activity, goal, verdict, deadline):
+    """Second opinion from a screenshot when the title alone was unclear. Gemini only."""
+    key = (goal, activity.app, activity.title, _page(activity))
+    seen = _screen_cache.get(key)
+    if seen and time.monotonic() - seen[1] < VISION_REUSE_SECS:
+        return seen[0]
+    if deadline - time.monotonic() < VISION_MIN_SECS:
+        return verdict
+    try:
+        return _wait(_pool.submit(_ask_screen_and_cache, activity, goal, key), deadline)
+    except FutureTimeout:
+        return Verdict(Focus.UNSURE, reason=f"{verdict.reason} | screenshot check took too long")
+    except Exception as error:
+        return Verdict(Focus.UNSURE, reason=f"{verdict.reason} | screenshot: {error}")
+
+
+def _classify_with(activity, goal, backend, vision=False):
+    deadline = time.monotonic() + CLASSIFY_TIMEOUT_SECS
     try:
         verdict = _match_rule(activity)
         if verdict:
             return verdict
         if backend not in _ASK:
             return Verdict(Focus.UNSURE, reason=f"unknown DETECTOR_LLM {backend!r}, use gemini or jev")
-        key = (backend, goal, activity.app, activity.title, activity.url)
-        if key in _cache:
-            return _cache[key]
-        return _pool.submit(_ask_and_cache, backend, activity, goal, key).result(timeout=CLASSIFY_TIMEOUT_SECS)
+        key = (backend, goal, activity.app, activity.title, _page(activity))
+        verdict = _cache.get(key) or _wait(_pool.submit(_ask_and_cache, backend, activity, goal, key), deadline)
+        if vision and verdict.focus is Focus.UNSURE:
+            verdict = _look_at_screen(activity, goal, verdict, deadline)
+        return verdict
     except FutureTimeout:
         return Verdict(Focus.UNSURE, reason=f"{backend} took over {CLASSIFY_TIMEOUT_SECS}s")
     except Exception as error:
@@ -305,7 +394,8 @@ def _classify_with(activity, goal, backend):
 
 def classify(activity, goal):
     """ON_TASK / DISTRACTED / UNSURE for this activity. Never raises; answers in under 5 seconds."""
-    return _classify_with(activity, goal, os.getenv("DETECTOR_LLM", "gemini").strip().lower())
+    return _classify_with(activity, goal, os.getenv("DETECTOR_LLM", "gemini").strip().lower(),
+                          vision=os.getenv("DETECTOR_VISION", "0").strip() == "1")
 
 
 # ---------- manual test ----------
@@ -317,11 +407,14 @@ def main():
                         default=os.getenv("DETECTOR_LLM", "gemini").strip().lower(),
                         help="which LLM judges titles the rules can't (default: DETECTOR_LLM or gemini)")
     parser.add_argument("--every", type=float, default=3, help="seconds between checks (default 3)")
+    parser.add_argument("--vision", action="store_true", default=os.getenv("DETECTOR_VISION", "0").strip() == "1",
+                        help="screenshot the front window when the title is unclear (default: DETECTOR_VISION)")
     args = parser.parse_args()
     backends = LLM_BACKENDS if args.llm == "both" else (args.llm,)
     sys.stdout.reconfigure(line_buffering=True)  # show each check right away, even when piped
 
-    print(f"Goal: {args.goal} | LLM: {', '.join(backends)} | checking every {args.every:g}s. Ctrl+C to stop.\n")
+    print(f"Goal: {args.goal} | LLM: {', '.join(backends)} | screenshots: {'on' if args.vision else 'off'} | "
+          f"checking every {args.every:g}s. Ctrl+C to stop.\n")
     try:
         while True:
             stamp = datetime.now().strftime("%H:%M:%S")
@@ -333,7 +426,7 @@ def main():
                 print(f"[{stamp}] {activity.app} | {activity.title}{url}")
                 for backend in backends:
                     started = time.monotonic()
-                    verdict = _classify_with(activity, args.goal, backend)
+                    verdict = _classify_with(activity, args.goal, backend, vision=args.vision)
                     secs = time.monotonic() - started
                     said = f'  → Mom says "{verdict.distraction}"' if verdict.distraction else ""
                     print(f"    {backend:<6} {verdict.focus.value:<10} {secs:4.2f}s  {verdict.reason}{said}")
