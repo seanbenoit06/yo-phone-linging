@@ -17,6 +17,9 @@ MODULES = [
     "mom.calendar.gcal",
     "mom.calendar.summary",
     "mom.calendar.briefing",
+    "mom.calendar.auth",
+    "mom.calendar.brief",
+    "mom.calendar.agent",
     "mom.triggers.calendar",
 ]
 

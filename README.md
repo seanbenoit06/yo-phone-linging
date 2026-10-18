@@ -49,6 +49,26 @@ texts `?` when you drift, calls you if you keep going, texts a follow-up quoting
 calls back later, and calls `FRIEND_PHONE_NUMBER` if you ignore her.
 Set `DEMO_MODE=1` in `.env` so the whole ladder fits in a 3-minute demo.
 
+### Calendar briefing (Google Calendar)
+
+Mom reads today's Google Calendar and calls you about it. One-time setup:
+
+1. [Google Cloud console](https://console.cloud.google.com): create a project and enable the **Google Calendar API**.
+2. **Google Auth Platform** → Branding (app name + your email, Audience *External*), then
+   Audience → **Test users** → add the Google account whose calendar Mom should read.
+3. Clients → Create client → **Desktop app** → download the JSON → save it as `credentials.json` in the project root.
+4. `python -m mom.calendar.agent` creates the calendar agent; put the printed ID in `.env` as `ELEVENLABS_AGENT_ID_CALENDAR`.
+   Set `CALENDAR_IDS=all` (or comma-separated calendar IDs) in `.env`.
+
+```bash
+python -m mom.calendar.gcal                           # sign in (browser, first time) and print today's events
+python -m mom.calendar.brief --dry-run                # show what Mom would say, no call
+python -m mom.calendar.brief                          # Mom calls you about today, right now
+python -m mom.calendar.brief --fake-events --dry-run  # no Google needed
+```
+
+Google sign-ins for apps in *Testing* expire after 7 days; Mom then opens the browser again by itself.
+
 No `uv`? `python3 -m venv .venv`, activate it as above, then `pip install -r requirements.txt`
 (on Windows the command is usually `python`, not `python3`).
 
@@ -72,6 +92,8 @@ corporate proxies and macOS's "Install Certificates.command" problem don't break
 | `common.py` | Re-exports the shared helpers from `mom/config.py` and `mom/elevenlabs.py` |
 | `mom/config.py`, `mom/elevenlabs.py` | Load `.env`; call the ElevenLabs API with readable errors |
 | `mom/run.py`, `mom/triggers/` | Trigger framework (calendar feature in progress) |
+| `mom/calendar/` | Google Calendar sign-in + fetch, the briefing call (`python -m mom.calendar.brief`) |
+| `docs/agents/calendar-agent.md` | Calendar agent prompt + first message (pushed with `python -m mom.calendar.agent`) |
 | `.env.example` | Template for `.env` (secrets live only in `.env`, which is git-ignored) |
 
 ## Troubleshooting
