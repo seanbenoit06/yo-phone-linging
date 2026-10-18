@@ -5,7 +5,8 @@ lazily and has its own try/except, so a missing or broken source never breaks th
 
 To add a source: create tasks/<name>.py with a fetch function that returns list[Task] and
 raises with a readable message (no secrets) on failure, then add one line to SOURCES.
-Optionally add is_configured() -> bool; when it returns False the source shows as "off".
+Optionally add is_configured() -> bool; when it returns False the source shows as "off",
+with the module's OFF_MESSAGE (how to connect it) if it defines one.
 """
 
 import importlib
@@ -16,6 +17,7 @@ from datetime import datetime
 SOURCES = {
     "canvas": "tasks.canvas:fetch_canvas_tasks",
     "trello": "tasks.trello:fetch_trello_tasks",
+    "calendar": "tasks.calendar:fetch_calendar_tasks",
 }
 
 CACHE_SECS = 5 * 60
@@ -57,8 +59,9 @@ def _cached(name):
     try:
         is_configured = getattr(module, "is_configured", None)
         if is_configured and not is_configured():
-            # Cheap check, so it isn't cached: a token added to .env shows up on the next call.
-            return [], _status("off", message=f"{name} isn't connected (no token in .env).")
+            # Cheap check, so it isn't cached: a login added later shows up on the next call.
+            message = getattr(module, "OFF_MESSAGE", None) or f"{name} isn't connected."
+            return [], _status("off", message=message)
         tasks = list(fetch())
         status, ttl = _status("ok", synced_at=datetime.now().astimezone()), CACHE_SECS
     except Exception as exc:

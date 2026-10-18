@@ -1,7 +1,7 @@
 """Canvas (canvas.uw.edu) planner items → Task.
 
-Needs CANVAS_TOKEN (and optionally CANVAS_BASE_URL) in .env.
-Manual test: python -m tasks.canvas
+Needs CANVAS_SESSION_COOKIE (UW blocks personal access tokens) or CANVAS_TOKEN in .env,
+and optionally CANVAS_BASE_URL. Manual test: python -m tasks.canvas
 """
 
 import json
@@ -31,21 +31,26 @@ MAX_PAGES = 20  # 50 items per page; stops a broken Link header from looping for
 COURSE_CODE = re.compile(r"^([A-Z&]+(?: [A-Z&]+)*) (\d{3})\b")
 
 TOKEN_HELP = "canvas.uw.edu → Account → Settings → Approved Integrations → + New Access Token"
+COOKIE_HELP = (
+    "Chrome → canvas.uw.edu (logged in) → Cmd+Option+I → Application → Cookies → "
+    "https://canvas.uw.edu → canvas_session → copy its Value into CANVAS_SESSION_COOKIE in .env"
+)
+OFF_MESSAGE = "Canvas isn't connected. Set CANVAS_SESSION_COOKIE in .env (steps in .env.example)."
 
 
 class CanvasError(Exception):
-    """A readable reason the Canvas sync failed. Never contains the token."""
+    """A readable reason the Canvas sync failed. Never contains the token or cookie."""
 
 
 def is_configured():
-    return _token() is not None
+    return _auth()[0] is not None
 
 
 def fetch_canvas_tasks():
     """Unsubmitted Canvas items due from today 00:00 to today + 14 days. Raises CanvasError."""
-    token = _token()
-    if token is None:
-        raise CanvasError(f"CANVAS_TOKEN isn't set in .env. Make one at {TOKEN_HELP}")
+    auth_headers, auth_kind = _auth()
+    if auth_headers is None:
+        raise CanvasError(f"Canvas isn't connected. {COOKIE_HELP}")
     base_url = _base_url()
 
     today = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -59,10 +64,10 @@ def fetch_canvas_tasks():
     items = []
     url = f"{base_url}/api/v1/planner/items"
     for _ in range(MAX_PAGES):
-        response = _get(url, token, params)
+        response = _get(url, auth_headers, auth_kind, params)
         items += _parse_json(response)
         url = response.links.get("next", {}).get("url")
-        # The next link already carries the query. Never send the token to another host.
+        # The next link already carries the query. Never send the login to another host.
         if not url or not url.startswith(base_url + "/"):
             break
         params = None
@@ -71,33 +76,49 @@ def fetch_canvas_tasks():
     return sorted(tasks, key=lambda task: (task.due_at is None, task.due_at or today))
 
 
-def _token():
-    return optional_config("CANVAS_TOKEN")
+def _auth():
+    """(headers, "token" | "cookie") for the login in .env, or (None, None). A token wins."""
+    token = optional_config("CANVAS_TOKEN")
+    if token:
+        return {"Authorization": f"Bearer {token}"}, "token"
+    cookie = optional_config("CANVAS_SESSION_COOKIE")
+    if cookie:
+        # A raw header, so requests sends the value exactly as copied from the browser.
+        return {"Cookie": f"canvas_session={cookie}"}, "cookie"
+    return None, None
+
+
+def _login_expired(auth_kind):
+    if auth_kind == "cookie":
+        return CanvasError(f"Canvas login cookie expired or is wrong. Copy it again: {COOKIE_HELP}")
+    return CanvasError(f"Canvas token is wrong or expired. Make a new one at {TOKEN_HELP}")
 
 
 def _base_url():
     return optional_config("CANVAS_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
 
 
-def _get(url, token, params):
+def _get(url, auth_headers, auth_kind, params):
     try:
         response = requests.get(
             url,
             params=params,
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            headers={**auth_headers, "Accept": "application/json"},
             timeout=TIMEOUT_SECS,
+            allow_redirects=False,  # an expired cookie can redirect to the login page
         )
     except requests.exceptions.InvalidHeader:
-        # requests puts the header value (the token) in this message, so don't pass it on.
-        raise CanvasError(f"CANVAS_TOKEN has spaces or odd characters. Copy it again from {TOKEN_HELP}")
+        # requests puts the header value (the token / cookie) in this message, so don't pass it on.
+        name = "CANVAS_TOKEN" if auth_kind == "token" else "CANVAS_SESSION_COOKIE"
+        raise CanvasError(f"{name} has spaces or odd characters. Copy it again.")
     except requests.exceptions.Timeout:
         raise CanvasError(f"Canvas didn't answer within {TIMEOUT_SECS}s. Check your internet / VPN.")
     except requests.exceptions.RequestException:
         raise CanvasError(f"Couldn't reach Canvas ({_base_url()}). Check your internet / VPN and CANVAS_BASE_URL.")
 
     status = response.status_code
-    if status == 401:
-        raise CanvasError(f"Canvas token is wrong or expired. Make a new one at {TOKEN_HELP}")
+    if status == 401 or 300 <= status < 400:
+        raise _login_expired(auth_kind)
     if status == 403:
         raise CanvasError("Canvas said 403 Forbidden: this token can't read your planner.")
     if status == 404:
@@ -186,7 +207,7 @@ def _until(due_at, now):
 
 def main():
     if not is_configured():
-        fail(f"CANVAS_TOKEN isn't set in .env.\n   Make one at {TOKEN_HELP}\n   then add CANVAS_TOKEN=... to .env")
+        fail(f"Canvas isn't connected. Set CANVAS_SESSION_COOKIE in .env:\n   {COOKIE_HELP}")
     try:
         tasks = fetch_canvas_tasks()
     except CanvasError as exc:
