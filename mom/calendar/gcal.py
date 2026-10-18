@@ -216,18 +216,26 @@ def _describe_http_error(response, calendar_id):
 
 
 def main():
+    import argparse
+
     from mom.calendar.auth import AuthError
+    from mom.calendar.briefing import briefing_time
     from mom.calendar.summary import format_time
 
-    now = datetime.now().astimezone()
+    parser = argparse.ArgumentParser(description="Print a day's Google Calendar events (no call).")
+    parser.add_argument("--date", metavar="YYYY-MM-DD", help="the day to show (default: today)")
+    args = parser.parse_args()
     try:
+        now = briefing_time(args.date)
         events = fetch_todays_events(now)
+    except ValueError as err:
+        fail(str(err))
     except (AuthError, CalendarError) as err:
         fail(str(err))
 
-    print(f"📅 Today's events ({len(events)}), CALENDAR_IDS={optional_config('CALENDAR_IDS', 'primary')}:")
+    print(f"📅 Events on {now.date().isoformat()} ({len(events)}), CALENDAR_IDS={optional_config('CALENDAR_IDS', 'primary')}:")
     if not events:
-        print("   (nothing on the calendar today)")
+        print("   (nothing on the calendar that day)")
     for event in events:
         when = "All day" if event.all_day else f"{format_time(event.start)}-{format_time(event.end)}"
         where = f" ({event.location})" if event.location else ""

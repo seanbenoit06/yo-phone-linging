@@ -64,10 +64,14 @@ Mom reads today's Google Calendar and calls you about it. One-time setup:
 python -m mom.calendar.gcal                           # sign in (browser, first time) and print today's events
 python -m mom.calendar.brief --dry-run                # show what Mom would say, no call
 python -m mom.calendar.brief                          # Mom calls you about today, right now
+python -m mom.calendar.brief --date 2026-10-16        # about another day, as if it's that morning
+python -m mom.calendar.brief --date 2026-10-16 --at 13:30   # ... from 1:30 PM that day
+python -m mom.calendar.gcal --date 2026-10-16         # print that day's events, no call
 python -m mom.calendar.brief --fake-events --dry-run  # no Google needed
 ```
 
 Google sign-ins for apps in *Testing* expire after 7 days; Mom then opens the browser again by itself.
+For a daily call, schedule `python -m mom.calendar.brief` (no `--date`) with cron / Task Scheduler at the time you want it.
 
 No `uv`? `python3 -m venv .venv`, activate it as above, then `pip install -r requirements.txt`
 (on Windows the command is usually `python`, not `python3`).

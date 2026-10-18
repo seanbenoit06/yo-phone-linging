@@ -1,23 +1,36 @@
-"""Mom calls you right now about today's calendar (the briefing call).
+"""Mom calls you about a day on your calendar (the briefing call).
 
 Usage:
-    python -m mom.calendar.brief                         # real calendar, real call
-    python -m mom.calendar.brief --dry-run               # real calendar, print instead of calling
-    python -m mom.calendar.brief --fake-events --dry-run # no Google, no call
+    python -m mom.calendar.brief                            # today, right now: real calendar, real call
+    python -m mom.calendar.brief --dry-run                  # print instead of calling
+    python -m mom.calendar.brief --date 2026-10-16          # brief that day as if it's that morning
+    python -m mom.calendar.brief --date 2026-10-16 --at 13:30
+    python -m mom.calendar.brief --fake-events --dry-run    # no Google, no call
 
-Run it on demand for now. Later a morning cron job / scheduled task can run the same command.
+Run it on demand for now. Later a morning cron job / scheduled task runs it with no
+--date (today) at the time you want the call.
 """
 
 import argparse
+
 from datetime import datetime
 
-from mom.calendar.briefing import build_briefing_reason
+from mom.calendar.briefing import DEFAULT_BRIEFING_TIME, before_first_event, briefing_time, build_briefing_reason
 from mom.caller import CallError, load_call_config, make_call
 from mom.config import fail, optional_config
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Mom calls you about today's calendar.")
+    parser = argparse.ArgumentParser(description="Mom calls you about a day on your calendar.")
+    parser.add_argument("--date", metavar="YYYY-MM-DD", help="the day to brief (default: today)")
+    parser.add_argument(
+        "--at",
+        metavar="HH:MM",
+        help=(
+            f"the time of day Mom briefs from, 24-hour (default: now for today; for other days "
+            f"{DEFAULT_BRIEFING_TIME}, or 30 min before the first event if that's earlier)"
+        ),
+    )
     parser.add_argument("--fake-events", action="store_true", help="use a made-up day instead of Google Calendar")
     parser.add_argument("--dry-run", action="store_true", help="print the call instead of placing it")
     return parser.parse_args()
@@ -25,6 +38,11 @@ def parse_args():
 
 def main():
     args = parse_args()
+    try:
+        now = briefing_time(args.date, args.at)
+    except ValueError as err:
+        fail(str(err))
+
     config = load_call_config()
     # The default agent's prompt needs goal / opening_line / ..., which a briefing doesn't send.
     if not optional_config("ELEVENLABS_AGENT_ID_CALENDAR"):
@@ -35,7 +53,6 @@ def main():
         if not args.dry_run:
             fail(message)
         print(f"⚠️  {message}")
-    now = datetime.now().astimezone()
 
     if args.fake_events:
         from mom.calendar.fake import fake_events
@@ -50,8 +67,12 @@ def main():
         except (AuthError, CalendarError) as err:
             fail(str(err))
 
+    # Another day without --at: a morning briefing, so the first event shouldn't be [now] already.
+    if args.at is None and now.date() != datetime.now().astimezone().date():
+        now = before_first_event(events, now)
+
     reason = build_briefing_reason(events, now)
-    print(f"📅 {reason.summary}")
+    print(f"📅 {reason.summary} for {reason.dynamic_variables['current_time']}")
     print("   " + reason.dynamic_variables["todays_events"].replace("\n", "\n   "))
     try:
         make_call(config, reason, dry_run=args.dry_run)

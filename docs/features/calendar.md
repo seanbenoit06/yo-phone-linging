@@ -18,7 +18,9 @@ and nags you about it. On demand for now; a morning cron job / scheduled task ca
 - [x] Step 2: `summarize_events` formatting (`[done]` / `[now]` / `[next]` markers, 1500-char cap)
 - [x] Step 3: ElevenLabs calendar agent created from `docs/agents/calendar-agent.md` (`python -m mom.calendar.agent`)
 - [x] Step 4: `python -m mom.calendar.brief` (ad hoc; the time-of-day trigger is postponed in favor of cron)
-- [ ] Step 5: real Google sign-in and a real call about your actual day
+- [x] `--date YYYY-MM-DD` / `--at HH:MM`: brief any day (other days default to that morning, before the first event)
+- [x] Step 5: real Google sign-in, real call about 2026-10-16 from the real calendar (2026-10-17)
+- [ ] Cron / Task Scheduler entry for a daily morning call
 
 Later milestones: a call N minutes before each meeting; deadlines (all-day events / Google Tasks).
 
@@ -39,6 +41,8 @@ The prompt and first message that use them: `docs/agents/calendar-agent.md`.
 ## Decisions
 
 - Briefing is ad hoc (`python -m mom.calendar.brief`), scheduled later by cron / Task Scheduler rather than `mom.run`.
+  `--date` briefs another day from that morning: 08:00, or 30 min before the first timed event if earlier,
+  so the first event is `[next]`, not `[now]`. `--at` overrides the time.
   `build_briefing_reason` still sets dedup key `calendar:briefing:<YYYY-MM-DD>` for when it's wired into a loop.
 - Google Calendar REST API via `google-auth`'s `AuthorizedSession` (on `requests`, so truststore applies), scope `calendar.readonly`.
 - `CALENDAR_IDS`: comma-separated IDs, or `all` (every calendar in your list except hidden and free/busy-only ones).
