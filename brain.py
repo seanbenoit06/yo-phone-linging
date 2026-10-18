@@ -69,13 +69,15 @@ class Brain:
         if focus == Focus.ON_TASK:
             self._reset_streak()
             return []
-        if focus == Focus.UNSURE:
+        if focus == Focus.UNSURE and self.distracted_since is None:
             return []
 
-        # DISTRACTED
-        if self.distracted_since is None:
-            self.distracted_since = now
-        self.distraction = verdict.distraction or activity.title
+        # DISTRACTED, or UNSURE in the middle of a distraction streak (e.g. glancing at the
+        # dashboard): an unclear screen isn't proof you're back to work, so the clock keeps running.
+        if focus == Focus.DISTRACTED:
+            if self.distracted_since is None:
+                self.distracted_since = now
+            self.distraction = verdict.distraction or activity.title
         distracted_for = (now - self.distracted_since).total_seconds()
 
         actions = []

@@ -198,6 +198,7 @@ DISTRACTION_SITES = [
 ]
 
 # Apps that are always a distraction: app name -> name Mom says (same label webcam.py uses)
+DASHBOARD_PORT = 3000  # web/ dev server; the dashboard is never judged as work or distraction
 DISTRACTION_APPS = {
     "iPhone Mirroring": "your phone",
 }
@@ -258,7 +259,17 @@ def _env_key(name):
     return value
 
 
+def _is_own_dashboard(activity):
+    url = urlparse(activity.url or "")
+    local = (url.hostname or "").lower() in {"localhost", "127.0.0.1"}
+    return (activity.title or "").startswith("Mom.exe") or (local and url.port == DASHBOARD_PORT)
+
+
 def _match_rule(activity):
+    # Neutral, not on task: glancing at the dashboard (e.g. to show the ladder on stage) must
+    # neither look like a distraction nor reset the distraction timer.
+    if _is_own_dashboard(activity):
+        return Verdict(Focus.UNSURE, reason="rule: the Mom.exe dashboard is neutral")
     if activity.app in DISTRACTION_APPS:
         return Verdict(Focus.DISTRACTED, distraction=DISTRACTION_APPS[activity.app],
                        reason=f"rule: {activity.app} is a distraction")
