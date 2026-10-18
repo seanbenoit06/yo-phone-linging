@@ -10,10 +10,11 @@ python -c "from tasks import get_tasks; print(get_tasks())"
 
 ## Status (2026-10-17)
 
-- Canvas: done and tested against fake data, a wrong token (real 401 from canvas.uw.edu),
-  no token, an unreachable host and a missing source module. Not yet run with Jay's real token.
-- Not wired into `api.py` yet (core owns that).
-- Trello / Calendar: not started. Add `tasks/<name>.py` + one line in `SOURCES`.
+- Canvas: works with Jay's real `canvas_session` cookie (8 assignments, 0.5 s, cached after).
+  Also tested: fake data, wrong token / cookie (real 401), nothing set, unreachable host,
+  missing source module.
+- `api.py` serves it at `GET /api/tasks` (core owns that).
+- Trello and Calendar sources are owned by other sessions (`tasks/trello.py`, `tasks/calendar.py`).
 
 ## Decisions
 
