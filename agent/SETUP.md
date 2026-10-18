@@ -123,3 +123,25 @@ Real call (`conv_4801m56ftfj7er39kt88f15zy0qn`, prompt v3.2): passed. Jay talked
 she answered each time and never restarted the opener. After two refusals she shrank the step twice,
 then got a yes. One goodbye with `end_call` in the same turn; hung up 4s later. `promised_step` was the
 final, smallest step. Reply latency 0.50–0.72s, except one 3.75s wait after a trailing "...so...".
+
+## v4 (2026-10-18): more Asian mom, firmer, faster
+
+Why: on a real call (`conv_1501m57vs0qbe4d94zrrkye936n6`) Mom accepted "I'm studying on Instagram"
+("Mom believes you, sweetie"), caved to "stop" and to swearing ("Okay okay, Mom stops"), used a `[slow]`
+tag, and took 1.5 to 2.1 s to answer two turns (LLM time-to-first-byte was only 0.4 to 0.5 s, so the delay
+was turn-taking).
+
+Changes (live agent updated through the API; previous values in parentheses, for rollback):
+- `system_prompt.md`: sees through fake excuses, mom moves (rhetorical questions, cousin Kevin, Auntie Linda,
+  "you ate already or not?"), "stop" ends the lecture but not the step, offended-but-firm on rudeness,
+  under 15 words per turn, step by the second turn, no `[slow]` / `[calm]` except the stressed case,
+  "sweetie" at most once per call.
+- LLM `temperature`: 0.5 (was 0.0) so she doesn't repeat the same lines.
+- `turn.turn_eagerness`: `eager` (was `normal`) so she answers sooner.
+- `tts.speed`: 1.08 (was 1.0).
+
+Text-only simulations (4 cases): fake excuse called out ("Tutorials on Instagram? Aiyah, Mom not born
+yesterday."), rudeness ("Excuse me?! You talk to your mother like that? Okay, problem two."), "do it for me"
+("Then Mom gets the degree!"), "stop stop" ("Okay okay, no lecture. ... Promise?") all reached a promise and
+`end_call`; the stressed case switched to calm support without asking for a promise. Real-call latency with
+`eager` still needs one live call to confirm.
