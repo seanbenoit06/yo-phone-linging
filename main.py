@@ -9,12 +9,15 @@ dashboard (web/, API on http://127.0.0.1:8765 or API_PORT).
 
 import os
 import queue
+import shutil
+import sys
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import caller
+import controls
 import detector
 import intent
 import settings
@@ -25,8 +28,7 @@ from common import fail, load_config
 from models import Activity, CallResult, CallType, Focus, IntentKind, PlaceCall, SendText, Verdict
 
 LOOP_SLEEP_SECS = 0.5
-# Ignore a webcam result older than this (a few missed checks), e.g. after the thread hiccups.
-CAM_STALE_SECS = settings.DETECT_EVERY_SECS * 3 + 5
+PREVIEW_EVERY_SECS = 3      # camera preview photos (no Gemini) while the dashboard's camera window is open
 # Which dashboard health dot a failing step turns red.
 MODULE_OF_SOURCE = {"text": "imessage", "detect": "detector", "call": "calls", "webcam": "webcam"}
 # The test call needs something to talk about when no session is running (same as call_me.py).
@@ -43,19 +45,51 @@ NO_SCREEN_ERROR = ("Can't read the active window. Check macOS Privacy & Security
                    "(Accessibility / Automation) for your terminal.")
 
 
+_dashboard = None  # the DashboardApi, so log lines also reach GET /api/logs
+
+
 def log(source, message):
     print(f"{datetime.now():%H:%M:%S} [{source}] {message}", flush=True)
+    if _dashboard:
+        _dashboard.log_line(source, message)
+
+
+def cam_stale_secs():
+    """Ignore a webcam result older than this (a few missed checks), e.g. after the thread hiccups."""
+    return settings.DETECT_EVERY_SECS * 3 + 5
 
 
 def load_webcam():
-    if os.getenv("USE_WEBCAM", "0") != "1":
-        return None
+    """(webcam module, None) if this computer can use the camera, else (None, why not).
+
+    Loaded whether or not the camera is switched on, so the dashboard can turn it on later.
+    """
+    if sys.platform != "darwin":
+        return None, "The camera only works on macOS for now."
+    if not shutil.which("ffmpeg"):
+        return None, "ffmpeg isn't installed (brew install ffmpeg), so Mom can't use the camera."
     try:
         import webcam
-        return webcam
+        return webcam, None
     except Exception as err:  # noqa: BLE001
-        log("webcam", f"disabled, couldn't import webcam.py: {err!r}")
-        return None
+        log("webcam", f"couldn't import webcam.py: {err!r}")
+        return None, f"webcam.py couldn't be loaded ({type(err).__name__}). See the terminal."
+
+
+def verdict_method(reason):
+    """How the detector decided, from its reason prefix: rule / ai / screenshot, or None."""
+    head = (reason or "").split(":", 1)[0].strip().lower()
+    if head == "rule":
+        return "rule"
+    if head.endswith("+screenshot"):
+        return "screenshot"
+    if head.startswith(("gemini", "jev")):
+        return "ai"
+    return None
+
+
+def verdict_json(verdict):
+    return verdict and {"focus": verdict.focus.value, "distraction": verdict.distraction, "reason": verdict.reason}
 
 
 def warm_tasks_cache():
@@ -83,6 +117,7 @@ class Call:
 
 class MomLoop:
     def __init__(self, config):
+        global _dashboard
         self.config = config
         friend_phone = os.getenv("FRIEND_PHONE_NUMBER", "").strip() or None
         self.brain = Brain(
@@ -90,13 +125,18 @@ class MomLoop:
             user_phone=config["MY_PHONE_NUMBER"],
             friend_phone=friend_phone,
         )
-        self.webcam = load_webcam()
+        # Everything dashboard-related only feeds the dashboard; the brain never reads it.
+        self.api = DashboardApi(redact=secrets_to_redact(config["MY_PHONE_NUMBER"], friend_phone))
+        _dashboard = self.api
+        self.webcam, webcam_reason = load_webcam()
+        controls.load(webcam_available=bool(self.webcam), webcam_reason=webcam_reason)
+        self.api.settings_info = controls.info
+        self.api.photo_source = self.current_photo
+
         self.call_results = queue.Queue()  # (call id, CallResult, error) from call threads, drained by the loop
         self.next_text_poll = 0.0
         self.next_detect = 0.0
 
-        # Everything below only feeds the dashboard; the brain never reads it.
-        self.api = DashboardApi(redact=secrets_to_redact(config["MY_PHONE_NUMBER"], friend_phone))
         self.calls = {}                    # call id → Call, while the call thread runs
         self.next_call_id = 1
         self.session_started_at = None
@@ -109,12 +149,14 @@ class MomLoop:
         # The webcam check takes ~3 s, so it runs in its own thread (watch_webcam) and the loop
         # only reads its latest result; otherwise texts and dashboard commands would stall.
         self.cam_lock = threading.Lock()
-        self.cam_result = None             # (monotonic time, Verdict or None, Exception or None)
+        # Latest judged photo: (monotonic time, Verdict or None, Exception or None, judged_at, latency_ms).
+        self.cam_result = None
+        self.cam_preview_error = None      # why the last preview photo failed (webcam thread)
+        # monitor.screen for the dashboard: when and how the screen was last checked.
+        self.screen_check = {"at": None, "method": None, "latency_ms": None}
         # "source.function" → error message, until that same function succeeds again.
         # Drives the health dots, and records each new error on the timeline only once.
         self.failing = {}
-        if not self.webcam and os.getenv("USE_WEBCAM", "0") == "1":
-            self.failing["webcam.import"] = "USE_WEBCAM=1 but webcam.py couldn't be imported (see the terminal)."
         self.stats = {"focused_secs": 0.0, "distracted_secs": 0.0, "calls_made": 0, "texts_sent": 0}
         self.publish()
 
@@ -131,7 +173,9 @@ class MomLoop:
         threading.Thread(target=warm_tasks_cache, name="tasks-warm-up", daemon=True).start()
         if self.webcam:
             threading.Thread(target=self.watch_webcam, name="webcam", daemon=True).start()
-        log("main", f"Mom.exe is up (demo mode: {settings.DEMO_MODE}, webcam: {bool(self.webcam)}). "
+        on = controls.get()
+        log("main", f"Mom.exe is up (demo mode: {settings.DEMO_MODE}, screen: {controls.screen_enabled()}, "
+                    f"screenshots: {on['screenshots']}, webcam: {controls.webcam_enabled()}). "
                     'Text the agent to start, e.g. "Finishing CSE homework by 9 PM".')
         log("api", f"dashboard API on http://{HOST}:{port}/api/state")
         try:
@@ -151,6 +195,7 @@ class MomLoop:
         if self.brain.goal and tick >= self.next_detect:
             self.next_detect = tick + settings.DETECT_EVERY_SECS
             self.watch_screen(tick)
+        self.sync_preview_health()
 
         while not self.call_results.empty():
             call_id, result, error = self.call_results.get()
@@ -188,6 +233,7 @@ class MomLoop:
     def watch_screen(self, tick):
         if self.forced and time.monotonic() < self.forced_until:
             activity, verdict = self.forced
+            self.screen_check = {"at": datetime.now(), "method": "forced", "latency_ms": 0}
         else:
             self.forced = self.forced_until = None
             activity, verdict = self.detect()
@@ -199,41 +245,83 @@ class MomLoop:
                 self.execute(self.safely("brain", self.brain.on_verdict, activity, verdict, datetime.now()))
 
     def detect(self):
-        activity = self.safely("detect", detector.get_activity, none_is_error=NO_SCREEN_ERROR)
-        verdict = None
-        if activity:
-            verdict = self.safely("detect", detector.classify, activity, self.brain.goal)
+        """The screen (if screen monitoring is on) plus the webcam (if it's on). Either can be off."""
+        activity = verdict = None
+        screen_on = controls.screen_enabled()
+        if screen_on:
+            started = time.monotonic()
+            activity = self.safely("detect", detector.get_activity, none_is_error=NO_SCREEN_ERROR)
+            if activity:
+                verdict = self.safely("detect", detector.classify, activity, self.brain.goal)
+            self.screen_check = {"at": datetime.now(), "method": verdict_method(verdict and verdict.reason),
+                                 "latency_ms": round((time.monotonic() - started) * 1000)}
 
-        # The webcam only ever adds evidence: phone in hand beats an on-task screen.
-        if self.webcam:
+        if self.webcam and controls.webcam_enabled():
             cam = self.safely("webcam", self.latest_webcam_verdict)
-            if cam and cam.focus == Focus.DISTRACTED:
-                activity, verdict = Activity(app="webcam", title="phone in hand"), cam
+            # With the screen on, the webcam only adds evidence: phone in hand beats an on-task screen.
+            # With the screen off, the webcam is all Mom has, so its "focused" counts too.
+            if cam and (cam.focus == Focus.DISTRACTED or not screen_on):
+                activity, verdict = Activity(app="webcam", title="phone in hand" if cam.distraction else "camera"), cam
         return activity, verdict
 
     def watch_webcam(self):
-        """Background thread: check the webcam while a session runs; keep only the latest result."""
+        """Background thread. Camera on + session: judge a photo every check. Camera on, no session,
+        dashboard's camera window open: preview photos only (no Gemini). Camera off: drop the photo."""
         while True:
-            if not self.brain.goal:
+            if not controls.webcam_enabled():
+                if self.webcam.latest_photo():
+                    self.webcam.forget_photo()
+                with self.cam_lock:
+                    self.cam_result = None
+                self.cam_preview_error = None
                 time.sleep(1)
-                continue
-            try:
-                cam, error = self.webcam.check(), None
-            except Exception as err:  # noqa: BLE001  (check() shouldn't raise, but never kill this thread)
-                cam, error = None, err
-            with self.cam_lock:
-                self.cam_result = (time.monotonic(), cam, error)
-            time.sleep(settings.DETECT_EVERY_SECS)
+            elif self.brain.goal:
+                started = time.monotonic()
+                try:
+                    cam, error = self.webcam.check(), None
+                except Exception as err:  # noqa: BLE001  (check() shouldn't raise, but never kill this thread)
+                    cam, error = None, err
+                latency_ms = round((time.monotonic() - started) * 1000)
+                with self.cam_lock:
+                    self.cam_result = (time.monotonic(), cam, error, datetime.now(), latency_ms)
+                self.cam_preview_error = None
+                time.sleep(settings.DETECT_EVERY_SECS)
+            elif self.api.preview_wanted():
+                photo = self.webcam.snapshot()
+                self.cam_preview_error = None if photo else (self.webcam.last_error() or "Couldn't take a photo.")
+                time.sleep(PREVIEW_EVERY_SECS)
+            else:
+                time.sleep(0.5)
 
     def latest_webcam_verdict(self):
         """The webcam thread's latest Verdict, or None if it's too old. Raises its error, for safely()."""
         with self.cam_lock:
             result = self.cam_result
-        if result is None or time.monotonic() - result[0] > CAM_STALE_SECS:
+        if result is None or time.monotonic() - result[0] > cam_stale_secs():
             return None
         if result[2] is not None:
             raise result[2]
         return result[1]
+
+    def sync_preview_health(self):
+        """Turn the webcam health dot red when preview photos fail (the thread can't call safely())."""
+        error, key = self.cam_preview_error, "webcam.snapshot"
+        if error and self.failing.get(key) != error:
+            log("webcam", f"preview error: {error}")
+            self.note_failure("webcam", key, error)
+        elif not error:
+            self.failing.pop(key, None)
+
+    def current_photo(self):
+        """For GET /api/webcam/photo: (jpeg bytes, None) or (None, why there's no photo)."""
+        if not self.webcam:
+            return None, controls.info()["unavailable_reason"].get("webcam", "The camera isn't available.")
+        if not controls.webcam_enabled():
+            return None, "The camera is off. Turn it on in the Control Panel."
+        photo = self.webcam.latest_photo()
+        if not photo:
+            return None, self.cam_preview_error or "No photo yet. Mom is taking one."
+        return photo[0], None
 
     def execute(self, actions, test=False):
         for action in actions or []:
@@ -322,6 +410,25 @@ class MomLoop:
             log("api", f"forcing distracted on {distraction!r} for {seconds}s")
             return 200, {"ok": True, "distraction": distraction, "seconds": seconds}, []
 
+        if name == "settings":
+            before = controls.get()
+            try:
+                info = controls.update(payload)
+            except controls.SettingsError as err:
+                return 400, {"ok": False, "error": str(err)}, []
+            changed = {key: value for key, value in info["settings"].items() if before.get(key) != value}
+            if changed:
+                log("api", "settings: " + ", ".join(f"{key}={value}" for key, value in changed.items()))
+            if "demo_mode" in changed:
+                self.next_detect = 0.0  # use the new check interval right away
+            if changed.get("screen_monitoring") is False:
+                self.activity = self.verdict = None
+                self.screen_check = {"at": None, "method": None, "latency_ms": None}
+                self.failing = {key: message for key, message in self.failing.items() if not key.startswith("detect.")}
+            if changed.get("webcam") is False:
+                self.failing = {key: message for key, message in self.failing.items() if not key.startswith("webcam.")}
+            return 200, {"ok": True, **info}, []
+
         return 400, {"ok": False, "error": f"Unknown command: {name}"}, []
 
     def test_call(self):
@@ -363,8 +470,12 @@ class MomLoop:
         self.failing[key] = message
 
     def module_health(self, module):
-        if module == "webcam" and not self.webcam and "webcam.import" not in self.failing:
-            return {"status": "off"}
+        if module == "webcam" and not controls.webcam_enabled():
+            reason = controls.info()["unavailable_reason"].get("webcam")
+            return {"status": "off", "message": reason} if reason else {"status": "off"}
+        if module == "detector" and not controls.screen_enabled():
+            reason = controls.info()["unavailable_reason"].get("screen") or "Screen monitoring is off."
+            return {"status": "off", "message": reason}
         errors = [message for key, message in self.failing.items()
                   if MODULE_OF_SOURCE.get(key.split(".")[0]) == module]
         return {"status": "error", "message": errors[-1]} if errors else {"status": "ok"}
@@ -386,6 +497,8 @@ class MomLoop:
 
     def session_ended(self, goal, reason):
         self.session_started_at = None
+        with self.cam_lock:
+            self.cam_result = None  # Mom only judges photos during a session
         self.activity = self.verdict = self.last_focus = None
         self.forced = self.forced_until = None
         summary = f"Session ended: {goal}" + (" (time's up)" if reason == "time_up" else "")
@@ -491,7 +604,41 @@ class MomLoop:
                 "calls_made": self.stats["calls_made"],
                 "texts_sent": self.stats["texts_sent"],
             },
+            "settings": controls.get(),
+            "monitor": self.monitor(),
         })
+
+    def monitor(self):
+        """State.monitor (docs/UI_SPEC.md section 9): is Mom actually looking, and when did she last look."""
+        in_session = self.brain.goal is not None
+        screen_on, webcam_on = controls.screen_enabled(), controls.webcam_enabled()
+        forced = bool(self.forced and self.forced_until and time.monotonic() < self.forced_until)
+        next_check = None
+        if in_session and (screen_on or webcam_on or forced):
+            next_check = datetime.now() + timedelta(seconds=max(0.0, self.next_detect - time.monotonic()))
+
+        with self.cam_lock:
+            cam = self.cam_result
+        photo = self.webcam.latest_photo() if self.webcam and webcam_on else None
+        return {
+            "screen": {
+                "enabled": screen_on,
+                "active": screen_on and in_session,
+                "every_secs": settings.DETECT_EVERY_SECS,
+                "last_check_at": iso(self.screen_check["at"]),
+                "next_check_at": iso(next_check),
+                "method": self.screen_check["method"],
+                "latency_ms": self.screen_check["latency_ms"],
+            },
+            "webcam": {
+                "enabled": webcam_on,
+                "active": webcam_on and in_session,
+                "last_check_at": iso(cam[3]) if cam else None,
+                "verdict": verdict_json(cam[1]) if cam else None,
+                "latency_ms": cam[4] if cam else None,
+                "photo_at": iso(photo[1]) if photo else None,
+            },
+        }
 
 
 def secrets_to_redact(*phones):

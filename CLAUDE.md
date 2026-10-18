@@ -32,6 +32,8 @@ An AI agent that phone-calls you when you procrastinate.
    (`?mock=1` plays a scripted demo without the Python app).
 5. Start a session in the dashboard (`MATH 208 homework until 11 PM`) or by iMessage. With `DEMO_MODE=1`:
    distracted 10 s → "?" text, 25 s → call, callback 45 s after a promise.
+6. The dashboard's Control Panel switches (screen, screenshots, camera, lock-in, demo timing, AI model) are
+   saved in `state/settings.json` and override `.env`. Delete that file to go back to the `.env` values.
 
 **Real side effects.** A session texts and calls `MY_PHONE_NUMBER`; **Test call** rings it right away;
 calls cost about $0.10 per minute. Agent sessions: ask the user before anything that texts or calls.

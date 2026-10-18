@@ -1,8 +1,9 @@
 """Catch the user on their phone, using the laptop webcam.
 
 check() takes one photo, asks Gemini whether the person is on their phone, and returns a models.Verdict.
-The photo only lives in memory (ffmpeg pipes it straight to us, nothing is written to disk)
-and is dropped when check() returns.
+snapshot() only takes a photo (the dashboard's camera preview, no Gemini). Photos only live in memory:
+ffmpeg pipes them straight to us and nothing is written to disk. The latest one is kept for the
+dashboard (latest_photo()) until the next photo replaces it or forget_photo() drops it.
 
 Gemini won a benchmark against YOLO26, MediaPipe gaze tracking, Jev 1.14, OpenAI luna-decisions and
 Perceptron Mk1.5: it caught 6/6 phones held in frame with 0/9 false alarms. A phone held out of frame
@@ -20,7 +21,9 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
+from datetime import datetime
 
 import requests
 from dotenv import load_dotenv
@@ -60,6 +63,45 @@ RESPONSE_SCHEMA = {
 }
 
 load_dotenv(ENV_FILE)
+
+_photo_lock = threading.Lock()
+_last_photo = None   # (jpeg bytes, captured_at): memory only, for the dashboard preview
+_last_error = None   # why the last snapshot() failed, for the dashboard
+
+
+def latest_photo():
+    """(jpeg bytes, timezone-aware captured_at) of the latest photo, or None."""
+    with _photo_lock:
+        return _last_photo
+
+
+def forget_photo():
+    global _last_photo
+    with _photo_lock:
+        _last_photo = None
+
+
+def snapshot():
+    """Take a photo without asking Gemini (no cost). Returns the JPEG bytes, or None; never raises."""
+    global _last_error
+    try:
+        jpeg = _take_photo(timeout=TIME_BUDGET_SECS)
+    except Exception as error:  # noqa: BLE001
+        _last_error = f"{type(error).__name__}: {error}"
+        return None
+    _last_error = None
+    return jpeg
+
+
+def last_error():
+    """Why the last snapshot() returned None, or None if it worked."""
+    return _last_error
+
+
+def _remember_photo(jpeg):
+    global _last_photo
+    with _photo_lock:
+        _last_photo = (jpeg, datetime.now().astimezone())
 
 
 def check() -> Verdict:
@@ -116,6 +158,7 @@ def _take_photo(timeout):
             "Check camera access for your terminal app in System Settings → Privacy & Security → Camera, "
             "and WEBCAM_NAME in .env"
         )
+    _remember_photo(result.stdout)
     return result.stdout
 
 

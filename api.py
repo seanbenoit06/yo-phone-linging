@@ -1,8 +1,10 @@
-"""Local HTTP API for the web dashboard (web/). Contract: docs/UI_SPEC.md section 4.
+"""Local HTTP API for the web dashboard (web/). Contract: docs/UI_SPEC.md sections 4 and 9.
 
 main.py owns the brain and the loop; this module never touches them:
 - GET /api/state and /api/events only read the snapshot and events that main.py publishes
   every loop step. GET /api/tasks calls tasks.get_tasks(), which caches and locks on its own.
+- GET /api/logs reads main.py's log lines (log_line). GET /api/settings and
+  GET /api/webcam/photo call providers main.py sets (settings_info, photo_source).
 - POST commands are validated here, then wait in a queue that main.py drains at the start
   of its next step. The request blocks until main.py replies (or COMMAND_WAIT_SECS pass).
 
@@ -26,6 +28,9 @@ HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 MAX_EVENTS = 500
 FIRST_PAGE_EVENTS = 200   # GET /api/events?after=0
+MAX_LOG_LINES = 1000
+FIRST_PAGE_LOG_LINES = 300  # GET /api/logs?after=0
+PREVIEW_SECS = 10         # each GET /api/webcam/photo keeps the camera preview running this long
 COMMAND_WAIT_SECS = 6     # the dashboard client gives up after 8s
 MAX_BODY_BYTES = 16 * 1024
 MAX_GOAL_CHARS = 200
@@ -95,6 +100,12 @@ class DashboardApi:
         self._commands = queue.Queue()
         # Phone numbers and API keys. Masked in every response, whatever produced the text.
         self._redact = sorted({s for s in redact if s and len(s) >= 6}, key=len, reverse=True)
+        self._logs = deque(maxlen=MAX_LOG_LINES)
+        self._last_log_id = self._last_id
+        self._preview_until = 0.0  # monotonic
+        # Set by main.py: () -> SettingsResponse, and () -> (jpeg bytes or None, reason if None).
+        self.settings_info = lambda: {"settings": {}, "available": {}, "unavailable_reason": {}}
+        self.photo_source = lambda: (None, "The camera isn't set up.")
         self.server = None
 
     # ---------- main.py side ----------
@@ -114,6 +125,17 @@ class DashboardApi:
                 "summary": summary,
                 "data": data,
             })
+
+    def log_line(self, source, message):
+        """One main.py log line, for GET /api/logs. Safe to call from any thread."""
+        with self._lock:
+            self._last_log_id += 1
+            self._logs.append({"id": self._last_log_id, "at": iso(datetime.now()),
+                               "source": source, "message": message})
+
+    def preview_wanted(self):
+        """True while the dashboard's camera window is open (it polls the photo)."""
+        return time.monotonic() < self._preview_until
 
     def take_commands(self):
         """Every command waiting for the loop, oldest first."""
@@ -148,6 +170,20 @@ class DashboardApi:
             if after <= 0:
                 return list(self._events)[-FIRST_PAGE_EVENTS:]
             return [event for event in self._events if event["id"] > after]
+
+    def logs_after(self, after):
+        with self._lock:
+            if after <= 0:
+                return list(self._logs)[-FIRST_PAGE_LOG_LINES:]
+            return [line for line in self._logs if line["id"] > after]
+
+    def photo(self):
+        """GET /api/webcam/photo: the latest JPEG. Also keeps the camera preview running."""
+        self._preview_until = time.monotonic() + PREVIEW_SECS
+        jpeg, reason = self.photo_source()
+        if not jpeg:
+            raise BadRequest(reason or "No photo yet.", status=404)
+        return jpeg
 
     def tasks(self):
         """GET /api/tasks. tasks.get_tasks() caches, locks and never raises, so it runs on this thread."""
@@ -242,8 +278,9 @@ COMMANDS = {
     "/api/not-distracted": lambda body: ("intent", Intent(kind=IntentKind.NOT_DISTRACTED, text="I'm actually working")),
     "/api/test-call": lambda body: ("test_call", None),
     "/api/demo/force-distracted": _force_distracted,
+    "/api/settings": lambda body: ("settings", body),  # validated by controls.update in the loop
 }
-GETS = {"/api/state", "/api/events", "/api/tasks"}
+GETS = {"/api/state", "/api/events", "/api/tasks", "/api/settings", "/api/logs", "/api/webcam/photo"}
 
 
 # ---------- HTTP ----------
@@ -290,6 +327,12 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, {"events": api.events_after(_after(url.query))})
             elif method == "GET" and url.path == "/api/tasks":
                 self._send(200, api.tasks())
+            elif method == "GET" and url.path == "/api/settings":
+                self._send(200, api.settings_info())
+            elif method == "GET" and url.path == "/api/logs":
+                self._send(200, {"lines": api.logs_after(_after(url.query))})
+            elif method == "GET" and url.path == "/api/webcam/photo":
+                self._send_bytes(200, api.photo(), "image/jpeg")
             elif method == "POST" and url.path in COMMANDS:
                 name, payload = COMMANDS[url.path](self._json_body())
                 self._send(*api.submit(name, payload))
@@ -330,9 +373,11 @@ class _Handler(BaseHTTPRequestHandler):
         return body
 
     def _send(self, status, body):
-        data = self.server.api.encode(body)
+        self._send_bytes(status, self.server.api.encode(body), "application/json; charset=utf-8")
+
+    def _send_bytes(self, status, data, content_type):
         self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         origin = self.headers.get("Origin")
@@ -351,4 +396,4 @@ def _after(query):
     try:
         return int(values[0])
     except ValueError:
-        raise BadRequest("after must be an event id (a number).") from None
+        raise BadRequest("after must be an id (a number).") from None

@@ -39,6 +39,7 @@ so **only edit the files you own** and talk to other modules only through the ty
 | `tasks/` | canvas session | Task sources (`tasks/canvas.py` now; Trello / Calendar later) → `list[Task]`. |
 | `web/` | Codex | Local dashboard (React + Vite). Spec and API contract: `docs/UI_SPEC.md`. |
 | `api.py` | core | Local HTTP API for the dashboard (`127.0.0.1:8765`), served from `main.py`. |
+| `controls.py` | core | Runtime settings from the dashboard's Control Panel, saved in `state/settings.json`. |
 
 ## Contracts
 
@@ -90,6 +91,24 @@ Each module should still be runnable on its own (`python detector.py ...`) for m
 - **Safety**: binds to `127.0.0.1`; rejects a non-local `Host` or `Origin` (403), so other websites
   can't place calls; CORS for local origins (`http://localhost:3000`). Phone numbers and `*_API_KEY` values are
   masked in every response.
+- **v2 (`docs/UI_SPEC.md` section 9)**: `GET/POST /api/settings` (POST goes through the command queue and
+  `controls.update`), `GET /api/logs?after=` (every `main.log()` line, last 1000, redacted),
+  `GET /api/webcam/photo` (latest JPEG from memory; each request keeps the no-Gemini camera preview running
+  for 10 s), and `settings` + `monitor` in `GET /api/state`.
+
+### `controls.py` (runtime settings)
+
+```python
+load(webcam_available, webcam_reason)   # main.py, once: .env defaults, then state/settings.json on top
+get() -> dict                           # screen_monitoring, screenshots, webcam, detector_mode, detector_llm, demo_mode
+info() -> dict                          # SettingsResponse: settings, available, unavailable_reason
+update(changes) -> dict                 # validate, apply, save to state/settings.json; raises SettingsError
+screen_enabled() / webcam_enabled()     # the setting AND this computer can do it
+```
+
+Applying sets `DETECTOR_VISION` / `DETECTOR_MODE` / `DETECTOR_LLM` in `os.environ` (detector.py reads them per call)
+and calls `settings.apply_demo_mode()`, so always read `settings.X` at call time.
+`webcam.py` keeps only the latest photo in memory (`latest_photo()`, `snapshot()`, `forget_photo()`); nothing is written to disk.
 
 ## ElevenLabs agent contract
 
