@@ -17,6 +17,7 @@ from mom.config import fail
 
 LOOKAHEAD_DAYS = 7
 SIGN_IN_HELP = "Sign in once in a terminal: python -m mom.calendar.gcal (it opens your browser)."
+OFF_MESSAGE = f"Google Calendar isn't connected. {SIGN_IN_HELP}"
 
 
 class CalendarSourceError(Exception):
