@@ -15,6 +15,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Optional
 
 import caller
 import controls
@@ -35,6 +36,7 @@ MODULE_OF_SOURCE = {"text": "imessage", "detect": "detector", "call": "calls", "
 TEST_CALL_GOAL = "CSE homework"
 TEST_CALL_DISTRACTION = "TikTok"
 TEST_CALL_MINUTES = 5
+GUEST_CALL_EVERY_SECS = 60  # at most one guest call per minute
 CALL_STARTED_SUMMARY = {
     CallType.NUDGE: "Mom is calling you",
     CallType.CALLBACK: "Mom is calling you back",
@@ -113,6 +115,7 @@ class Call:
     call_type: CallType
     started_at: datetime
     test: bool
+    guest_name: Optional[str] = None  # a judge's own call from the dashboard (never fed to the brain)
 
 
 class MomLoop:
@@ -146,6 +149,7 @@ class MomLoop:
         self.last_focus = None             # a verdict event is recorded only when this changes
         self.forced_until = None           # monotonic time; POST /api/demo/force-distracted
         self.forced = None                 # (Activity, Verdict) used instead of the detector
+        self.last_guest_call_at = float("-inf")  # monotonic time of the last guest call (rate limit)
         # The webcam check takes ~3 s, so it runs in its own thread (watch_webcam) and the loop
         # only reads its latest result; otherwise texts and dashboard commands would stall.
         self.cam_lock = threading.Lock()
@@ -337,7 +341,7 @@ class MomLoop:
             return None, self.cam_preview_error or "No photo yet. Mom is taking one."
         return photo[0], None
 
-    def execute(self, actions, test=False):
+    def execute(self, actions, test=False, guest_name=None):
         for action in actions or []:
             if isinstance(action, SendText):
                 log("text", f"→ {action.text}")
@@ -345,18 +349,22 @@ class MomLoop:
                     self.stats["texts_sent"] += 1
                     self.record("text_out", f"Mom: {action.text}", text=action.text)
             elif isinstance(action, PlaceCall):
-                self.start_call(action, test)
+                self.start_call(action, test, guest_name)
             else:
                 log("main", f"unknown action: {action!r}")
 
-    def start_call(self, action, test=False):
-        call = Call(self.next_call_id, action.call_type, datetime.now(), test)
+    def start_call(self, action, test=False, guest_name=None):
+        call = Call(self.next_call_id, action.call_type, datetime.now(), test, guest_name)
         self.next_call_id += 1
         self.calls[call.id] = call
         self.stats["calls_made"] += 1
-        summary = CALL_STARTED_SUMMARY[action.call_type] + (" (test call)" if test else "")
+        if guest_name:
+            summary = f"Guest call to {guest_name}"
+        else:
+            summary = CALL_STARTED_SUMMARY[action.call_type] + (" (test call)" if test else "")
+        extra = {"guest_name": guest_name} if guest_name else {}
         self.record("call_started", summary, call_type=action.call_type.value,
-                    opening_line=action.variables.get("opening_line", ""))
+                    opening_line=action.variables.get("opening_line", ""), **extra)
 
         def run():
             log("call", f"📞 {action.call_type.value} call starting" + (" (test)" if test else ""))
@@ -393,7 +401,8 @@ class MomLoop:
             # Reply before sending texts, so the button doesn't wait on iMessage.
             self.publish()
             command.reply(status, body)
-            self.execute(actions, test=command.name == "test_call")
+            guest_name = command.payload.get("name") if command.name == "guest_call" else None
+            self.execute(actions, test=command.name in ("test_call", "guest_call"), guest_name=guest_name)
 
     def handle_command(self, name, payload):
         """Return (HTTP status, JSON body, actions to execute)."""
@@ -411,6 +420,19 @@ class MomLoop:
             if self.brain.call_in_progress or self.calls:
                 return 409, {"ok": False, "error": "Mom is already on the phone."}, []
             return 200, {"ok": True, "call_type": CallType.NUDGE.value}, [self.test_call()]
+
+        if name == "guest_call":
+            if self.brain.call_in_progress or self.calls:
+                return 409, {"ok": False, "error": "Mom is already on the phone. Try again when the call ends."}, []
+            wait = GUEST_CALL_EVERY_SECS - (time.monotonic() - self.last_guest_call_at)
+            if wait > 0:
+                return 429, {"ok": False, "error": f"Mom just called someone. Try again in {int(wait) + 1} s."}, []
+            self.last_guest_call_at = time.monotonic()
+            self.api.add_redaction(payload["phone"])
+            log("api", f"guest call to {payload['name']}")
+            variables = caller.build_dynamic_variables(
+                payload["name"], payload["goal"], payload["distraction"], TEST_CALL_MINUTES, call_type=CallType.NUDGE)
+            return 200, {"ok": True}, [PlaceCall(call_type=CallType.NUDGE, to_number=payload["phone"], variables=variables)]
 
         if name == "force_distracted":
             if self.brain.goal is None:
@@ -554,12 +576,16 @@ class MomLoop:
 
         who = "your friend" if call.call_type == CallType.SNITCH else "you"
         test = " (test call)" if call.test else ""
-        if error:
+        minutes, seconds = divmod(result.duration_secs, 60)
+        if call.guest_name:
+            outcome = f"failed: {error}" if error else (
+                f"ended after {minutes}:{seconds:02d}" if result.answered else "no answer")
+            summary = f"Guest call to {call.guest_name} {outcome}"
+        elif error:
             summary = f"Call failed{test}: {error}"
         elif not result.answered:
             summary = f"Mom called {who}. No answer.{test}"
         else:
-            minutes, seconds = divmod(result.duration_secs, 60)
             summary = f"Call with {who} ended after {minutes}:{seconds:02d}{test}"
             if result.promised_step:
                 summary += f" · promised: {result.promised_step}"
@@ -568,7 +594,8 @@ class MomLoop:
              "time_in_call_secs": int(turn.get("time_in_call_secs") or 0)}
             for turn in result.transcript
         ]
-        self.record("call_ended", summary, call_type=call.call_type.value, conversation_id=result.conversation_id,
+        extra = {"guest_name": call.guest_name} if call.guest_name else {}
+        self.record("call_ended", summary, **extra, call_type=call.call_type.value, conversation_id=result.conversation_id,
                     answered=result.answered, duration_secs=result.duration_secs,
                     promised_step=result.promised_step, excuse=result.excuse,
                     summary=result.summary or "", transcript=transcript)
@@ -608,7 +635,8 @@ class MomLoop:
                 "call_after_secs": settings.CALL_AFTER_DISTRACTED_SECS,
                 "callback_after_secs": settings.CALLBACK_AFTER_SECS,
             },
-            "call_in_progress": call and {"call_type": call.call_type.value, "started_at": iso(call.started_at)},
+            "call_in_progress": call and {"call_type": call.call_type.value, "started_at": iso(call.started_at),
+                                          **({"guest_name": call.guest_name} if call.guest_name else {})},
             "callback_at": iso(brain.callback_at),
             "last_promise": brain.last_promise,
             "missed_calls": brain.missed_calls,

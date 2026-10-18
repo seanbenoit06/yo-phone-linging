@@ -126,6 +126,13 @@ class DashboardApi:
                 "data": data,
             })
 
+    def add_redaction(self, secret):
+        """Mask one more value (e.g. a guest's phone number) in every response from now on."""
+        digits = "".join(ch for ch in secret if ch.isdigit())
+        with self._lock:
+            values = set(self._redact) | {v for v in (secret, digits, digits[-10:]) if v and len(v) >= 6}
+            self._redact = sorted(values, key=len, reverse=True)
+
     def log_line(self, source, message):
         """One main.py log line, for GET /api/logs. Safe to call from any thread."""
         with self._lock:
@@ -272,11 +279,56 @@ def _force_distracted(body):
     return "force_distracted", {"distraction": distraction.strip()[:60], "seconds": int(seconds)}
 
 
+GUEST_NAME_MAX = 40
+GUEST_GOAL_MAX = 120
+GUEST_DISTRACTION_MAX = 40
+
+
+def _guest_call(body):
+    """A judge's own call: their name, number and class. The number is never echoed back."""
+    if body.get("consent") is not True:
+        raise BadRequest("Tick the box to agree to one call from Mom.exe, an AI.")
+    name = body.get("name")
+    if not isinstance(name, str) or not name.strip() or len(name.strip()) > GUEST_NAME_MAX:
+        raise BadRequest(f"Enter a name (up to {GUEST_NAME_MAX} characters).")
+    if any(ch in name for ch in "{}<>") or not name.isprintable():
+        raise BadRequest("Use letters, numbers and spaces in the name.")
+    phone = _normalize_phone(body.get("phone"))
+    goal = _optional_text(body, "goal", GUEST_GOAL_MAX) or "your homework"
+    distraction = _optional_text(body, "distraction", GUEST_DISTRACTION_MAX) or "TikTok"
+    return "guest_call", {"name": name.strip(), "phone": phone, "goal": goal, "distraction": distraction}
+
+
+def _normalize_phone(value):
+    """(425) 555-1234, 425-555-1234 or +1 425 555 1234 → +14255551234. US by default."""
+    if not isinstance(value, str) or not value.strip():
+        raise BadRequest("Enter a phone number, like (425) 555-1234.")
+    digits = "".join(ch for ch in value if ch.isdigit())
+    if value.strip().startswith("+"):
+        if 8 <= len(digits) <= 15 and digits[0] != "0":
+            return "+" + digits
+    elif len(digits) == 10 and digits[0] not in "01":
+        return "+1" + digits
+    elif len(digits) == 11 and digits[0] == "1":
+        return "+" + digits
+    raise BadRequest("Enter a US number like (425) 555-1234, or start with + and the country code.")
+
+
+def _optional_text(body, key, limit):
+    value = body.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value.strip()) > limit or not value.isprintable():
+        raise BadRequest(f"{key} must be text up to {limit} characters.")
+    return value.strip() or None
+
+
 COMMANDS = {
     "/api/session/start": _start_session,
     "/api/session/stop": lambda body: ("intent", Intent(kind=IntentKind.STOP_SESSION, text="Done")),
     "/api/not-distracted": lambda body: ("intent", Intent(kind=IntentKind.NOT_DISTRACTED, text="I'm actually working")),
     "/api/test-call": lambda body: ("test_call", None),
+    "/api/guest-call": _guest_call,
     "/api/demo/force-distracted": _force_distracted,
     "/api/settings": lambda body: ("settings", body),  # validated by controls.update in the loop
 }

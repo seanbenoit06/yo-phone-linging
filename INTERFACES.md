@@ -76,6 +76,8 @@ Each module should still be runnable on its own (`python detector.py ...`) for m
 
 ### `api.py` (dashboard API)
 
+- **Guest call** (`POST /api/guest-call`, UI_SPEC section 10): a judge's own name, number and class; one voice call, never texts, never touches the brain (like Test call). Needs `consent: true`; 409 during a call, 429 within 60 s. The number is added to the response redaction list and is never logged.
+
 `python main.py` serves the API from `docs/UI_SPEC.md` section 4 on `http://127.0.0.1:8765`
 (`API_PORT` in `.env` to change it). Standard library only (`ThreadingHTTPServer`).
 
