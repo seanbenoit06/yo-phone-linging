@@ -307,3 +307,102 @@ web/
 - API down → banner, last data stays, auto-recovers when the API comes back.
 - `npm run build` passes with no TypeScript errors.
 - No secrets, keys or phone numbers anywhere in `web/`.
+
+## 9. v2: Monitoring and controls (Family Computer edition)
+
+Goal: when Jay shows Mom.exe to people, they can **see** that Mom is watching (screen and camera),
+read Mom's log live, and flip the real settings from the dashboard. The Control Panel is no longer read-only.
+
+### New windows (desktop icons in the left sidebar)
+
+1. **Mom's Eyes** (icon: eye). Two panes side by side (stacked below ~1200 px):
+   - **Screen**: current `activity` (app, title, URL host only), the verdict pill, a **method badge**
+     (`Rule`, `AI`, `AI + screenshot` with a camera icon, `Forced`), "checked 2 s ago · next in 1 s"
+     from `monitor.screen`, and a subtle scanning animation while it's actively checking.
+     States: *Paused* (screen monitoring off), *Waiting for a session* (no session), *Can't see the screen*
+     (`modules.detector` error, show its message), *Not available on this computer* (`available.screen` false).
+     When the method is `AI + screenshot`, show "Took a screenshot, looked, deleted it." Never show the screenshot.
+   - **Camera**: a CCTV / old-TV styled frame showing the latest photo from `GET /api/webcam/photo`,
+     refreshed every 3 s while this window is open (add `?t=<timestamp>` to bust the cache), a red **REC**
+     dot while the camera is on, the webcam verdict pill (`Phone in hand!` / `Focused` / `Not sure`),
+     "photo 2 s ago", and the line "Photos stay in memory. Nothing is saved."
+     States: *Camera off*, *Not available on this computer*, *Waiting for the first photo*,
+     error from `modules.webcam`. Outside a session the photo still refreshes (preview) but the verdict says
+     "Mom only judges during a session".
+2. **Mom's Log** (icon: terminal). A retro Command Prompt window: monospace, dark background, auto-scroll,
+   one line per log entry `23:05:09 [call] 📞 nudge call starting`, colored by `source`
+   (`detect`, `text`, `call`, `webcam`, `api`, `main`, `brain`). Controls: pause / resume auto-scroll,
+   a source filter, and clear-view (client side only). Polls `GET /api/logs` every 1 s.
+
+### Control Panel (Settings) becomes real
+
+Replace the read-only "Behind the scenes" block with switches that call `POST /api/settings` and show
+saving / saved / error inline. Keep `Your name` read-only. Show the ladder numbers under the demo switch
+(they change when demo timing flips).
+
+| Switch | Field | Notes |
+|---|---|---|
+| Screen monitoring | `screen_monitoring` | Off → Mom stops looking at the screen. |
+| Screenshot second look | `screenshots` | Only when the title is unclear. Disabled while screen monitoring is off. |
+| Camera | `webcam` | Disabled with the reason when `available.webcam` is false. |
+| Lock-in mode | `detector_mode` | `lockin` (other work counts as distracted) / `relaxed`. |
+| Demo timing | `demo_mode` | Fast ladder (10 s / 25 s / 45 s) vs real (2 min / 5 min / 5 min). |
+| AI model | `detector_llm` | `gemini` / `jev` (a segmented control). |
+
+Settings changes apply immediately and survive restarts. The dashboard never shows or edits phone numbers or keys.
+
+### API additions
+
+```ts
+interface Settings {
+  screen_monitoring: boolean;
+  screenshots: boolean;
+  webcam: boolean;
+  detector_mode: "lockin" | "relaxed";
+  detector_llm: "gemini" | "jev";
+  demo_mode: boolean;
+}
+interface SettingsResponse {
+  settings: Settings;
+  available: { screen: boolean; webcam: boolean };
+  unavailable_reason: { screen?: string; webcam?: string };   // why it's not available, if not
+}
+
+// Added to State:
+interface State {
+  // ...everything in section 4...
+  settings: Settings;
+  monitor: {
+    screen: {
+      enabled: boolean;              // screen_monitoring && available
+      active: boolean;               // enabled and a session is running
+      every_secs: number;
+      last_check_at: string | null;
+      next_check_at: string | null;
+      method: "rule" | "ai" | "screenshot" | "forced" | null;
+      latency_ms: number | null;
+    };
+    webcam: {
+      enabled: boolean;              // webcam && available
+      active: boolean;               // judging (enabled and a session is running)
+      last_check_at: string | null;  // last time Gemini judged a photo
+      verdict: null | { focus: Focus; distraction: string | null; reason: string };
+      latency_ms: number | null;
+      photo_at: string | null;       // when the latest photo was taken (judged or preview)
+    };
+  };
+}
+```
+
+| Method + path | Body / query | Response |
+|---|---|---|
+| `GET /api/settings` | | `SettingsResponse` |
+| `POST /api/settings` | any subset of `Settings` | `{ ok: true, ...SettingsResponse }` or `400 { ok: false, error }` (unknown key, wrong type, or turning on something unavailable) |
+| `GET /api/webcam/photo` | `?t=` ignored | `200 image/jpeg` (latest photo, `Cache-Control: no-store`), or `404 { ok: false, error }` when there's none. Each request also keeps the camera preview running for 10 s when no session is active. |
+| `GET /api/logs?after={id}` | `after=0` returns the latest 300 | `{ lines: { id: number; at: string; source: string; message: string }[] }`, oldest first |
+
+### Mock mode
+
+`mock.ts` must cover all of this: settings that toggle in memory, a monitor that ticks (checked / next),
+a placeholder camera image (generate an SVG or canvas image, no real photos in the repo), and a log stream
+that matches the scripted demo (`[detect] distracted: TikTok`, `[text] → ?`, `[call] 📞 nudge call starting`, ...).

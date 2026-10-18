@@ -45,6 +45,10 @@ All from 2026-10-17.
 - **Title + URL first, screenshots only as a fallback.** Text is faster (~0.8 s vs ~2.5 s), needs no
   Screen Recording permission, and sends one line instead of the whole screen. Screen monitoring
   isn't the selling point, so reliability wins.
+- **The Mom.exe dashboard is neutral (UNSURE), checked first** (core session, ec18476): title starts
+  with "Mom.exe", or localhost/127.0.0.1 on port 3000. Gemini once called it "playing a video game".
+  `brain.py` keeps a running distraction streak going on UNSURE, so showing the dashboard on stage
+  doesn't pause the ladder. No screenshot is taken for it.
 - **Rules before the LLM.** tiktok.com, instagram.com, youtube.com/shorts, reddit.com, x.com,
   twitter.com, facebook.com, netflix.com, twitch.tv and the iPhone Mirroring app are always
   DISTRACTED (0 s, no API call). iPhone Mirroring says "your phone", like `webcam.py`.
