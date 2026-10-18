@@ -4,6 +4,7 @@ wait for the call to end, then print the transcript.
 Usage:
     python call_me.py
     python call_me.py --goal "CSE homework" --distraction "TikTok"
+    python call_me.py --dry-run      # print the dynamic variables instead of calling
 """
 
 import argparse
@@ -39,6 +40,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Make Mom.exe call you.")
     parser.add_argument("--goal", default="CSE homework", help='what you should be doing (default: "CSE homework")')
     parser.add_argument("--distraction", default="TikTok", help='what you are doing instead (default: "TikTok")')
+    parser.add_argument("--dry-run", action="store_true", help="print the call instead of placing it")
     return parser.parse_args()
 
 
@@ -109,6 +111,11 @@ def main():
         f"minutes_distracted={MINUTES_DISTRACTED!r}  ringing_timeout={RINGING_TIMEOUT_SECS}s"
     )
     variables = build_dynamic_variables(config["USER_NAME"], args.goal, args.distraction, MINUTES_DISTRACTED)
+
+    if args.dry_run:
+        print("\n(dry run, no call placed) dynamic variables:")
+        print(json.dumps(variables, indent=2, ensure_ascii=False))
+        return
 
     try:
         response = place_call(config, config["MY_PHONE_NUMBER"], variables)

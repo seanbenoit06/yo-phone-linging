@@ -3,3 +3,10 @@
 __pycache__/
 *.pyc
 .DS_Store
+
+# Mom.exe runtime state (handled calls, cooldown)
+state/
+
+# Google OAuth files (calendar feature)
+credentials.json
+token.json
