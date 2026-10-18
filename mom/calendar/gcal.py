@@ -27,6 +27,8 @@ def fetch_todays_events(now: datetime, session=None) -> list[CalendarEvent]:
     session is a requests-style session (tests pass a fake). By default it's the
     signed-in Google session from mom.calendar.auth.
     """
+    if now.tzinfo is None:
+        raise ValueError("fetch_todays_events needs a timezone-aware now, e.g. datetime.now().astimezone()")
     if session is None:
         from mom.calendar.auth import get_session
 
@@ -35,30 +37,44 @@ def fetch_todays_events(now: datetime, session=None) -> list[CalendarEvent]:
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     day_end = day_start + timedelta(days=1)
 
+    found = [
+        (raw, calendar_name)
+        for calendar_id, calendar_name in _calendars(session)
+        for raw in _list_events(session, calendar_id, day_start, day_end)
+    ]
+    # A meeting you declined can still show up through someone else's shared calendar.
+    declined = {_event_key(raw) for raw, _ in found if _declined(raw)}
+
     events = []
     seen = set()
-    for calendar_id, calendar_name in _calendars(session):
-        for raw in _list_events(session, calendar_id, day_start, day_end):
-            event = normalize_event(raw, calendar_name, now.tzinfo)
-            if event is None or not (event.start < day_end and event.end > day_start):
-                continue
-            # The same meeting shows up once per calendar it's on; keep one.
-            key = (raw.get("iCalUID") or raw.get("id"), event.start)
-            if key in seen:
-                continue
-            seen.add(key)
-            events.append(event)
+    for raw, calendar_name in found:
+        key = _event_key(raw)
+        # The same meeting shows up once per calendar it's on; keep one.
+        if key in declined or key in seen:
+            continue
+        event = normalize_event(raw, calendar_name, now.tzinfo)
+        if event is None or not (event.start < day_end and event.end > day_start):
+            continue
+        seen.add(key)
+        events.append(event)
 
     return sorted(events, key=lambda event: (event.start, not event.all_day, event.title))
 
 
+def _event_key(raw):
+    """Same meeting on several calendars = same key. Recurring instances differ by start."""
+    start = raw.get("originalStartTime") or raw.get("start") or {}
+    return raw.get("iCalUID") or raw.get("id"), start.get("dateTime") or start.get("date")
+
+
+def _declined(raw):
+    return any(a.get("self") and a.get("responseStatus") == "declined" for a in raw.get("attendees") or [])
+
+
 def normalize_event(raw, calendar_name, tz):
     """Turn one Calendar API event into a CalendarEvent, or None if it should be skipped."""
-    if raw.get("status") == "cancelled" or raw.get("eventType") in IGNORED_EVENT_TYPES:
+    if raw.get("status") == "cancelled" or raw.get("eventType") in IGNORED_EVENT_TYPES or _declined(raw):
         return None
-    for attendee in raw.get("attendees") or []:
-        if attendee.get("self") and attendee.get("responseStatus") == "declined":
-            return None
 
     start, end = raw.get("start") or {}, raw.get("end") or {}
     if "date" in start:
@@ -100,8 +116,11 @@ def _calendars(session):
 
     calendars = []
     for item in _get_pages(session, "/users/me/calendarList", {}):
-        # Free/busy-only calendars have no titles to read out, and hidden ones you chose not to see.
+        # Free/busy-only calendars have no titles to read out; hidden or unchecked ones
+        # (in Google Calendar's sidebar) you chose not to see.
         if item.get("accessRole") == "freeBusyReader" or item.get("hidden"):
+            continue
+        if not item.get("selected") and not item.get("primary"):
             continue
         calendars.append((item["id"], item.get("summaryOverride") or item.get("summary") or item["id"]))
     return calendars
@@ -133,8 +152,21 @@ def _get_pages(session, path, params, calendar_id=None):
 
 
 def _get(session, path, params, calendar_id=None):
+    from google.auth.exceptions import RefreshError, TransportError
+
     try:
         response = session.get(API_BASE + path, params=params, timeout=TIMEOUT_SECS)
+    except RefreshError as err:
+        # The session refreshes on a 401 by itself; this means the sign-in was revoked or expired.
+        from mom.calendar.auth import TOKEN_FILE
+
+        TOKEN_FILE.unlink(missing_ok=True)
+        raise CalendarError(
+            f"Google no longer accepts your sign-in ({err}).\n"
+            "   Removed token.json. Run the command again to sign in in your browser."
+        )
+    except TransportError as err:
+        raise CalendarError(f"Couldn't reach Google to refresh your sign-in: {err}\n   Check your internet / VPN.")
     except requests.exceptions.Timeout:
         raise CalendarError(f"Google Calendar didn't answer within {TIMEOUT_SECS}s (timeout).")
     except requests.exceptions.ConnectionError:

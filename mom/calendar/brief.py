@@ -13,7 +13,7 @@ from datetime import datetime
 
 from mom.calendar.briefing import build_briefing_reason
 from mom.caller import CallError, load_call_config, make_call
-from mom.config import fail
+from mom.config import fail, optional_config
 
 
 def parse_args():
@@ -26,6 +26,15 @@ def parse_args():
 def main():
     args = parse_args()
     config = load_call_config()
+    # The default agent's prompt needs goal / opening_line / ..., which a briefing doesn't send.
+    if not optional_config("ELEVENLABS_AGENT_ID_CALENDAR"):
+        message = (
+            "No calendar agent: ELEVENLABS_AGENT_ID_CALENDAR isn't set in .env.\n"
+            "   Run `python -m mom.calendar.agent` and put the ID it prints in .env."
+        )
+        if not args.dry_run:
+            fail(message)
+        print(f"⚠️  {message}")
     now = datetime.now().astimezone()
 
     if args.fake_events:

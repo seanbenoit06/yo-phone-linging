@@ -24,4 +24,4 @@ def test_agent_doc_uses_only_sent_variables():
     sent = {"user_name", "todays_events", "event_count", "next_event", "current_time"}
     # ElevenLabs rejects calls that leave a used variable unfilled.
     assert used <= sent
-    assert "{{todays_events}}" in prompt and "{{next_event}}" in first_message
+    assert "{{todays_events}}" in prompt and "{{next_event}}" in prompt

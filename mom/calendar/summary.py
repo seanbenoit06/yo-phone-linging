@@ -5,6 +5,7 @@ from datetime import datetime
 from mom.calendar.events import CalendarEvent
 
 MAX_EVENTS_CHARS = 1500
+MAX_FIELD_CHARS = 120
 EMPTY_DAY = "(nothing on the calendar today)"
 NOTHING_NEXT = "nothing else today"
 # Built by hand: strftime("%-I") crashes on Windows, and %A / %B follow the OS locale.
@@ -26,7 +27,7 @@ def summarize_events(events: list[CalendarEvent], now: datetime) -> dict[str, st
     upcoming = next((event for event in timed if event.start > now), None)
 
     # (priority, line): when the list is too long, the lowest priority lines go first.
-    entries = [(1, f"All day  {event.title}{_where(event)}") for event in all_day]
+    entries = [(1, f"All day  {_clip(event.title)}{_where(event)}") for event in all_day]
     for event in timed:
         if event.end <= now:
             priority, marker = 0, "  [done]"
@@ -34,7 +35,7 @@ def summarize_events(events: list[CalendarEvent], now: datetime) -> dict[str, st
             priority, marker = 2, "  [now]"
         else:
             priority, marker = 2, "  [next]" if event is upcoming else ""
-        line = f"{format_time(event.start)}-{format_time(event.end)}  {event.title}{_where(event)}{marker}"
+        line = f"{format_time(event.start)}-{format_time(event.end)}  {_clip(event.title)}{_where(event)}{marker}"
         entries.append((priority, line))
 
     return {
@@ -59,14 +60,19 @@ def format_minutes(minutes):
 
 
 def _where(event):
-    return f" ({event.location})" if event.location else ""
+    return f" ({_clip(event.location)})" if event.location else ""
+
+
+def _clip(text, limit=MAX_FIELD_CHARS):
+    """Pasted notes in a title or location shouldn't push every other event out."""
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
 def _next_event(event, now):
     if event is None:
         return NOTHING_NEXT
     minutes = max(1, round((event.start - now).total_seconds() / 60))
-    return f"{event.title} at {format_time(event.start)} (in {format_minutes(minutes)})"
+    return f"{_clip(event.title)} at {format_time(event.start)} (in {format_minutes(minutes)})"
 
 
 def _fit(entries):

@@ -66,6 +66,11 @@ def main():
         return
 
     agent_id = optional_config("ELEVENLABS_AGENT_ID_CALENDAR")
+    if agent_id == config["ELEVENLABS_AGENT_ID"]:
+        fail(
+            "ELEVENLABS_AGENT_ID_CALENDAR is the same as ELEVENLABS_AGENT_ID, so this would overwrite\n"
+            "   the default agent's prompt. Remove ELEVENLABS_AGENT_ID_CALENDAR from .env to create a separate agent."
+        )
     created = False
     try:
         if not agent_id:
@@ -74,10 +79,17 @@ def main():
             response = api_request("POST", f"/v1/convai/agents/{source}/duplicate", api_key, json={"name": AGENT_NAME})
             agent_id = response["agent_id"]
             created = True
+            print(f"   New agent: {agent_id}")
         print(f"✏️  Updating {agent_id} from {AGENT_DOC.relative_to(PROJECT_DIR)} ...")
         api_request("PATCH", f"/v1/convai/agents/{agent_id}", api_key, json=patch)
     except ApiError as err:
-        fail(str(err))
+        hint = ""
+        if created:
+            hint = (
+                f"\n   The agent {agent_id} was created but not updated. Put it in .env as\n"
+                f"   ELEVENLABS_AGENT_ID_CALENDAR={agent_id} and rerun, so you don't create another one."
+            )
+        fail(str(err) + hint)
 
     print(f"✅ Calendar agent ready: {agent_id}")
     if created:

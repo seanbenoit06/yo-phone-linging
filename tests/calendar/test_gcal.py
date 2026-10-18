@@ -124,10 +124,11 @@ def test_all_calendars(now, calendar_ids):
     shared = ev("Group project", {"dateTime": "2026-10-17T15:00:00-07:00"}, {"dateTime": "2026-10-17T16:00:00-07:00"})
     session = FakeSession({
         "/users/me/calendarList": [{"items": [
-            {"id": "me@gmail.com", "summary": "me@gmail.com", "summaryOverride": "Personal"},
-            {"id": "uw#classes@group.calendar.google.com", "summary": "UW classes"},
-            {"id": "boss@x.com", "summary": "Boss", "accessRole": "freeBusyReader"},
-            {"id": "old@x.com", "summary": "Old", "hidden": True},
+            {"id": "me@gmail.com", "summary": "me@gmail.com", "summaryOverride": "Personal", "primary": True},
+            {"id": "uw#classes@group.calendar.google.com", "summary": "UW classes", "selected": True, "accessRole": "reader"},
+            {"id": "boss@x.com", "summary": "Boss", "accessRole": "freeBusyReader", "selected": True},
+            {"id": "old@x.com", "summary": "Old", "hidden": True, "selected": True},
+            {"id": "unchecked@x.com", "summary": "Unchecked in the sidebar"},
         ]}],
         "/calendars/me%40gmail.com/events": [{"items": [shared]}],
         "/calendars/uw%23classes%40group.calendar.google.com/events": [{"items": [
@@ -142,7 +143,115 @@ def test_all_calendars(now, calendar_ids):
         ("Midterm", "UW classes"),
         ("Group project", "Personal"),
     ]
-    assert not any("boss" in url or "old" in url for url, _ in session.requests)
+    assert not any(name in url for url, _ in session.requests for name in ("boss", "old", "unchecked"))
+
+
+def test_declined_on_one_calendar_is_skipped_everywhere(now, calendar_ids):
+    calendar_ids("primary, team@x.com")
+    start, end = {"dateTime": "2026-10-17T13:00:00-07:00"}, {"dateTime": "2026-10-17T14:00:00-07:00"}
+    mine = ev("Optional sync", start, end, attendees=[{"email": "me@x.com", "self": True, "responseStatus": "declined"}])
+    theirs = ev("Optional sync", start, end, attendees=[{"email": "me@x.com", "responseStatus": "declined"}])
+    session = FakeSession({"/calendars/team%40x.com/events": [{"items": [theirs]}], "/calendars/primary/events": [{"items": [mine]}]})
+    assert fetch_todays_events(now, session=session) == []
+
+
+def test_recurring_instances_are_kept_separately(now, calendar_ids):
+    morning = ev("Water plants", {"dateTime": "2026-10-17T08:00:00-07:00"}, {"dateTime": "2026-10-17T08:05:00-07:00"})
+    evening = ev("Water plants", {"dateTime": "2026-10-17T18:00:00-07:00"}, {"dateTime": "2026-10-17T18:05:00-07:00"})
+    session = FakeSession({"/calendars/primary/events": [{"items": [morning, evening]}]})
+    assert len(fetch_todays_events(now, session=session)) == 2
+
+
+def test_today_window_edges(now, calendar_ids):
+    session = FakeSession({"/calendars/primary/events": [{"items": [
+        ev("Ended at midnight", {"dateTime": "2026-10-16T23:00:00-07:00"}, {"dateTime": "2026-10-17T00:00:00-07:00"}),
+        ev("Crosses midnight", {"dateTime": "2026-10-16T23:30:00-07:00"}, {"dateTime": "2026-10-17T01:00:00-07:00"}),
+        ev("Conference", {"date": "2026-10-16"}, {"date": "2026-10-19"}),
+        ev("Yesterday", {"date": "2026-10-16"}, {"date": "2026-10-17"}),
+        ev("Starts at next midnight", {"dateTime": "2026-10-18T00:00:00-07:00"}, {"dateTime": "2026-10-18T01:00:00-07:00"}),
+    ]}]})
+    titles = [event.title for event in fetch_todays_events(now, session=session)]
+    assert titles == ["Conference", "Crosses midnight"]
+
+
+def test_naive_now_is_rejected(now):
+    with pytest.raises(ValueError):
+        fetch_todays_events(now.replace(tzinfo=None), session=FakeSession({}))
+
+
+def test_revoked_sign_in_removes_token(now, calendar_ids, tmp_path, monkeypatch):
+    from google.auth.exceptions import RefreshError
+
+    token = tmp_path / "token.json"
+    token.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(auth, "TOKEN_FILE", token)
+
+    class RevokedSession:
+        def get(self, *args, **kwargs):
+            raise RefreshError("invalid_grant: Token has been expired or revoked.")
+
+    with pytest.raises(CalendarError, match="sign in"):
+        fetch_todays_events(now, session=RevokedSession())
+    assert not token.exists()
+
+
+class FakeCredentials:
+    def __init__(self, valid=False, refresh_error=None):
+        self.valid = valid
+        self.refresh_token = "refresh"
+        self.refresh_error = refresh_error
+
+    def refresh(self, request):
+        if self.refresh_error:
+            raise self.refresh_error
+        self.valid = True
+
+    def to_json(self):
+        return '{"token": "fresh"}'
+
+
+@pytest.fixture
+def auth_files(tmp_path, monkeypatch):
+    from google.oauth2 import credentials as google_credentials
+
+    token = tmp_path / "token.json"
+    token.write_text('{"token": "old"}', encoding="utf-8")
+    monkeypatch.setattr(auth, "TOKEN_FILE", token)
+    monkeypatch.setattr(auth, "CREDENTIALS_FILE", tmp_path / "credentials.json")
+    reauthorized = []
+    monkeypatch.setattr(auth, "_authorize", lambda: reauthorized.append(True) or FakeCredentials(valid=True))
+    monkeypatch.setattr("google.auth.transport.requests.AuthorizedSession", lambda credentials: credentials)
+
+    def use(credentials):
+        monkeypatch.setattr(google_credentials.Credentials, "from_authorized_user_file", lambda *a, **k: credentials)
+
+    return token, reauthorized, use
+
+
+def test_expired_token_is_refreshed_and_saved(auth_files):
+    token, reauthorized, use = auth_files
+    use(FakeCredentials())
+    assert auth.get_session().valid
+    assert token.read_text(encoding="utf-8") == '{"token": "fresh"}'
+    assert not reauthorized
+
+
+def test_refresh_rejected_signs_in_again(auth_files):
+    from google.auth.exceptions import RefreshError
+
+    token, reauthorized, use = auth_files
+    use(FakeCredentials(refresh_error=RefreshError("invalid_grant")))
+    auth.get_session()
+    assert reauthorized and not token.exists()
+
+
+def test_refresh_offline_is_readable(auth_files):
+    from google.auth.exceptions import TransportError
+
+    _, _, use = auth_files
+    use(FakeCredentials(refresh_error=TransportError("no network")))
+    with pytest.raises(auth.AuthError, match="internet"):
+        auth.get_session()
 
 
 def test_comma_separated_ids(now, calendar_ids):

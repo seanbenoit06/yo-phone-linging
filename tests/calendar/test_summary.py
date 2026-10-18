@@ -83,6 +83,12 @@ def test_long_list_keeps_upcoming(now):
     assert text.splitlines()[-1].startswith("(+") and text.endswith(" more)")
 
 
+def test_huge_title_is_clipped_and_next_survives(now):
+    variables = summarize_events([timed(now, "Notes " + "x" * 3000, -60, -30), timed(now, "Exam", 30, 90)], now)
+    assert "Exam" in variables["todays_events"] and "[next]" in variables["todays_events"]
+    assert len(variables["todays_events"]) < 400
+
+
 def test_12_hour_times(tz):
     assert format_time(datetime(2026, 10, 17, 0, 5, tzinfo=tz)) == "12:05 AM"
     assert format_time(datetime(2026, 10, 17, 12, 0, tzinfo=tz)) == "12:00 PM"
