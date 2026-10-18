@@ -73,6 +73,24 @@ Brain.on_text(intent, now) / on_verdict(activity, verdict, now) / on_call_ended(
 `main.py` catches and logs any exception from these, so a broken module never stops the loop.
 Each module should still be runnable on its own (`python detector.py ...`) for manual testing.
 
+### `api.py` (dashboard API)
+
+`python main.py` serves the API from `docs/UI_SPEC.md` section 4 on `http://127.0.0.1:8765`
+(`API_PORT` in `.env` to change it). Standard library only (`ThreadingHTTPServer`).
+
+- **Threads**: the HTTP threads never touch the brain. `main.py` publishes a state snapshot every
+  loop step (`DashboardApi.publish`) and records timeline events (`DashboardApi.record`, last 500,
+  ids seeded from the clock so they keep increasing across restarts). `GET /api/state` and
+  `GET /api/events` only read those. `GET /api/tasks` calls `tasks.get_tasks()` directly.
+- **Commands** (`POST /api/...`) are validated in `api.py`, queued, and run by `main.py` at the start
+  of its next step (`MomLoop.handle_command`); the request waits up to 6 s for the reply.
+  Session start / stop / not-distracted become an `Intent` and go through `brain.on_text`, like an
+  iMessage. `test-call` builds a nudge `PlaceCall` and goes through `execute()`; its result is
+  **not** fed to the brain, so a test call never schedules a callback or a snitch call.
+- **Safety**: binds to `127.0.0.1`; rejects a non-local `Host` or `Origin` (403), so other websites
+  can't place calls; CORS for local origins (`http://localhost:3000`). Phone numbers and `*_API_KEY` values are
+  masked in every response.
+
 ## ElevenLabs agent contract
 
 Dynamic variables sent on **every** call (missing values are sent as `"none"`):
