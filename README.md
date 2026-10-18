@@ -1,63 +1,187 @@
 # Mom.exe
 
-An AI agent that phone-calls you when you procrastinate.
+**It's basically your mom with an API key.**
 
+Mom.exe is an AI accountability agent. It watches you work, texts you when you drift to TikTok, and
+then actually **phone-calls you**. On the call it doesn't just yell: it asks what's blocking you,
+shrinks the task into one five-minute step, gets your promise, texts it back to you, and calls back to check.
+
+Built at **DubHacks '26** for the **Cook Smarter** track.
+
+![Mom.exe dashboard during a call: "Mom would like a word."](docs/images/hero-call.jpg)
+
+<sub>Screenshots are from the dashboard's scripted demo mode (`?mock=1`), so they show sample data.</sub>
+
+## Why
+
+Productivity tools are easy to ignore. A notification gets swiped away, a blocker gets turned off,
+a screen-time limit becomes "15 more minutes". And procrastination is usually avoidance: the task feels
+too big to start. You don't need another alarm. You need someone who calls you and helps you take the
+first step, the way a mom would.
+
+## What Mom does
+
+```mermaid
+flowchart LR
+    A["Start a session<br/>dashboard, iMessage or a Canvas task"] --> B{"Drifting?<br/>screen + webcam"}
+    B -->|"10 s demo · 2 min real"| C["Check-in iMessage<br/>'Jay, what are you doing? TikTok??'"]
+    C -->|"25 s demo · 5 min real"| D["Phone call<br/>one 5-minute step + a promise"]
+    D -->|answered| E["Follow-up text<br/>quoting your promise"]
+    E -->|"45 s demo · 5 min real"| F["Callback<br/>'Did you do it?'"]
+    D -->|ignored| G["Calls a friend<br/>you opted in"]
 ```
-iMessage + screen (+ webcam) → main.py → brain.py → ElevenLabs API → Photon SIP trunk → your phone rings
+
+- **Watches**: the active window and browser tab (rules first, Gemini when unclear, a screenshot only as a
+  last resort) and, optionally, the webcam for a phone in your hand.
+- **Escalates**: a check-in iMessage, then a real phone call, then a follow-up text and a callback.
+  Ignore her and she calls the accountability buddy you opted in.
+- **Coaches**: on the call, Mom asks what's blocking you and keeps shrinking the step until you say yes.
+  The promise and your excuse are pulled out of the call automatically.
+- **Knows your work**: start a session straight from your **Canvas** assignments, **Trello** cards or
+  **Google Calendar** events.
+- **Takes corrections**: say "I'm actually working" and she stops flagging that app for the session.
+
+## A real call
+
+From a live test call (48 seconds). Jay refuses twice; Mom shrinks the step each time.
+
+> **Mom:** Jay! 5 min on TikTok?! Cousin Kevin would never. What are you stuck on with CSE homework?<br>
+> **Jay:** I don't know how to start.<br>
+> **Mom:** Okay okay, don't panic. Just open the assignment PDF and read problem one out…<br>
+> **Jay:** I don't wanna.<br>
+> **Mom:** Aiyah, I hear you. Just open the PDF, that's it, you don't even have to read it yet. Promise?<br>
+> **Jay:** No, I don't.<br>
+> **Mom:** Okay okay, Mom makes it even smaller. Just open your laptop and find the file. That's all. Promise?<br>
+> **Jay:** Okay.<br>
+> **Mom:** Good! Mom calls back in five minutes. Bye bye!
+
+Then the follow-up text: *"You promised Mom: open your laptop and find the file. I'm calling back in 1 min.
+Don't make me call your cousin."*
+
+## The dashboard: MomOS 2002
+
+A retro "family computer" desktop that shows exactly what Mom sees and why she decided it.
+
+| | |
+|---|---|
+| ![Study Control with the escalation ladder at the check-in step](docs/images/session-ladder.jpg) | ![Mom's Eyes: the screen pane and the camera pane](docs/images/moms-eyes.jpg) |
+| **Study Control.** The session, the escalation ladder and Mom's texts. | **Mom's Eyes.** What's on screen, how she judged it (rule, AI or screenshot), and the camera. |
+| ![Mom's Log: a live command-prompt log](docs/images/moms-log.jpg) | ![My Homework: tasks grouped by due date](docs/images/tasks.jpg) |
+| **Mom's Log.** Every decision, live. | **My Homework.** Canvas, Trello and Calendar tasks; start a session from any of them. |
+
+![Control Panel with real switches for screen monitoring, screenshots, camera, lock-in mode and demo timing](docs/images/control-panel.jpg)
+
+**Control Panel.** Real switches: screen monitoring, screenshot second look, camera, lock-in mode, demo timing, AI model.
+
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph sees["What Mom sees (runs on your laptop)"]
+        S["Screen<br/>window title → rules → Gemini → screenshot"]
+        W["Webcam<br/>Gemini: phone in hand?"]
+        T["Tasks<br/>Canvas · Trello · Google Calendar"]
+        I["What you tell her<br/>iMessage or the dashboard"]
+    end
+    B["Escalation brain<br/>brain.py state machine"]
+    subgraph reach["How Mom reaches you"]
+        V["Voice call<br/>ElevenLabs agent → Photon SIP trunk"]
+        M["iMessage<br/>Photon shared line"]
+        D["MomOS 2002 dashboard<br/>React · local API"]
+    end
+    S --> B
+    W --> B
+    T --> B
+    I --> B
+    B --> V
+    B --> M
+    B --> D
 ```
 
-`main.py` is the app: it reads your iMessages, watches your screen, and lets `brain.py` (the
-escalation state machine) decide when Mom sends a check-in text, calls, calls back, or calls your opted-in
-friend. See [INTERFACES.md](INTERFACES.md) for how the modules fit together and who owns what.
+- `main.py` is the loop. It polls iMessage, checks the screen every few seconds, runs the webcam in a
+  background thread, and serves the dashboard API on `127.0.0.1:8765`.
+- `brain.py` is a pure state machine (no network, no clock) that decides when to text, call, call back
+  or call the friend. Unclear screens never start a streak but don't interrupt one either.
+- `caller.py` places an outbound call through an **ElevenLabs** voice agent over a **Photon** SIP trunk.
+  The agent's Data Collection returns the promised step and the excuse as structured data.
+- `detector.py` uses rules for obvious distractions (TikTok, Instagram, Shorts, iPhone Mirroring) and
+  **Gemini** for everything else; `webcam.py` asks Gemini whether you're holding your phone.
+- `web/` is the React + Vite dashboard. More detail: [INTERFACES.md](INTERFACES.md) and [docs/UI_SPEC.md](docs/UI_SPEC.md).
 
-`mom/` holds the trigger framework (`mom/triggers/`), where the calendar feature is being built.
-See [CLAUDE.md](CLAUDE.md) and `docs/features/`.
+## Measured
 
-## Prerequisites (already done in the dashboards)
+| What | Result | Source |
+|---|---|---|
+| Mom's reply time on a call | 0.5 to 1.0 s | ElevenLabs turn metrics on real calls |
+| Call cost | about $0.10 per minute | 5 real calls: $0.195 for 124 s |
+| Phone-in-hand detection | Gemini caught 6/6 phones in frame, 0 false alarms in 9 no-phone shots | our benchmark of 5 vision models on hand-labeled webcam shots |
+| Flagging TikTok / Instagram / Shorts | instant (rules, no AI call) | `detector.py` |
+| Judging an unclear window | about 0.8 s (title) / 1.6 s (with screenshot) | Gemini 3.5 Flash-Lite |
+| Automated tests | 59 dashboard + 61 calendar | `cd web && npm test`, `pytest tests` |
 
-- Photon: US number, SIP voice profile, outbound calls enabled; your phone assigned to a shared iMessage line.
-- ElevenLabs: voice agent set up as described in `agent/SETUP.md` (First message is exactly
-  `{{opening_line}}`), and the Photon number imported via **From SIP Trunk** with outbound configured.
-- Python 3.10+ (3.12 recommended; pinned in `.python-version`). Works on macOS, Windows and Linux.
-  The screen detector (`detector.py`) and webcam (`webcam.py`, needs `ffmpeg`) are macOS-only for now.
+## Privacy and safety
 
-## Run steps
+- **Title first, screenshot last.** A screenshot is taken only when the window title is unclear, and it's deleted right away.
+- **Webcam frames stay in memory.** Nothing is written to disk.
+- **You can correct Mom** ("I'm actually working"), and she never flags that app again in the session.
+- **Friends opt in first**, and Mom says she's an AI when asked. If you sound stressed, she drops the jokes.
+- **Local by design.** The control API only answers your own laptop; phone numbers and keys are masked in every
+  response and log; URL query strings are stripped before anything reaches an AI model.
+
+## Built with
+
+Python 3.12 · ElevenLabs Agents · Photon (SIP voice + iMessage) · Google Gemini 3.5 Flash-Lite ·
+React + Vite + TypeScript · Canvas, Trello and Google Calendar APIs · ffmpeg
+
+---
+
+## Run it yourself
+
+You need a Photon project (a US number with a SIP voice profile, and your phone assigned to a shared
+iMessage line), an ElevenLabs voice agent set up as in [`agent/SETUP.md`](agent/SETUP.md), and a Gemini API key.
+Python 3.10+ (3.12 pinned in `.python-version`) and Node.js 22.12+ or 24+.
+The screen detector and the webcam are macOS-only for now.
 
 ```bash
-# 1. Create a virtual env and install dependencies (uv reads .python-version)
+# 1. Python environment (uv reads .python-version)
 uv venv
 source .venv/bin/activate          # Windows (PowerShell): .venv\Scripts\Activate.ps1
 uv pip install -r requirements.txt
 
-# 2. Create your .env and fill in the keys (see comments in .env.example)
+# 2. Keys and settings (every key is explained in .env.example)
 cp .env.example .env               # Windows (PowerShell): Copy-Item .env.example .env
 
 # 3. Find your phone_number_id and paste it into ELEVENLABS_PHONE_NUMBER_ID in .env
 python list_numbers.py
 
-# 4. Make Mom call you once, right now (tests the call path)
+# 4. Test the call path once
 python call_me.py --dry-run        # print what would be sent, no call
-python call_me.py
-python call_me.py --goal "CSE homework" --distraction "TikTok"
+python call_me.py                  # Mom calls you right now
 
-# 5. Run Mom.exe (keep this terminal open; the dashboard API is on 127.0.0.1:8765)
+# 5. Run Mom.exe (keep this terminal open)
 python main.py
 
-# 6. In a second terminal: the dashboard (Node.js 22.12+ or 24+)
+# 6. In a second terminal: the dashboard
 cd web
 npm install
-npm run dev                        # then open http://localhost:3000/?mock=0
+npm run dev                        # open http://localhost:3000/?mock=0
 ```
 
 Start a session from the dashboard (type `MATH 208 homework until 11 PM`, or pick a task and
-**Start with Mom**), or text the agent on iMessage. Mom watches your screen (and webcam with
-`USE_WEBCAM=1`), sends a check-in text when you drift ("what are you doing? TikTok?? You said MATH 208..."), calls you if you keep going, texts a follow-up quoting
-your promise, calls back later, and calls `FRIEND_PHONE_NUMBER` if you ignore her.
-Set `DEMO_MODE=1` in `.env` so the whole ladder fits in a 3-minute demo.
-`http://localhost:3000/?mock=1` plays a scripted demo without the Python app.
+**Start with Mom**), or text the agent on iMessage. Set `DEMO_MODE=1` in `.env` (or flip **Demo timing** in
+the Control Panel) so the whole ladder fits in a 3-minute demo. `http://localhost:3000/?mock=1` plays a
+scripted demo without the Python app. Control Panel changes are saved in `state/settings.json` and override
+`.env`; delete that file to go back to the `.env` values.
 
-Screen detection (`detector.py`) and the webcam (`webcam.py`) are macOS-only for now. On Windows,
-keep `USE_WEBCAM=0` and use the dashboard's **Settings → Demo controls → Force distracted**.
+No `uv`? `python3 -m venv .venv`, activate it as above, then `pip install -r requirements.txt`.
+HTTPS uses your OS certificate store (via `truststore`), so antivirus TLS scanning and corporate proxies
+don't break API calls.
+
+### Tasks: Canvas, Trello, Google Calendar
+
+- **Canvas**: `CANVAS_BASE_URL` plus `CANVAS_TOKEN`, or `CANVAS_SESSION_COOKIE` where personal tokens are blocked (see `.env.example`).
+- **Trello**: a read-only token and `TRELLO_BOARD_ID`; `python -m tasks.trello --lists` lists boards and lists.
+- **Google Calendar**: `credentials.json` (below), then sign in once with `python -m mom.calendar.gcal`.
 
 ### Calendar briefing (Google Calendar)
 
@@ -83,31 +207,30 @@ python -m mom.calendar.brief --fake-events --dry-run  # no Google needed
 Google sign-ins for apps in *Testing* expire after 7 days; Mom then opens the browser again by itself.
 For a daily call, schedule `python -m mom.calendar.brief` (no `--date`) with cron / Task Scheduler at the time you want it.
 
-No `uv`? `python3 -m venv .venv`, activate it as above, then `pip install -r requirements.txt`
-(on Windows the command is usually `python`, not `python3`).
+### Tests
 
-HTTPS uses your OS certificate store (via `truststore`), so antivirus TLS scanning (Norton, etc.),
-corporate proxies and macOS's "Install Certificates.command" problem don't break API calls.
+```bash
+python -m pytest -q tests          # calendar feature
+cd web && npm test && npm run build
+```
 
-## Files
+## Repository map
 
-| File | What it does |
+| Path | What it does |
 |---|---|
-| `main.py` | The agent loop: reads texts, watches the screen, runs the brain, executes actions |
-| `brain.py` | Escalation state machine (text → call → callback → snitch) |
+| `main.py` | The agent loop: reads texts, watches the screen and webcam, runs the brain, serves the dashboard API |
+| `brain.py` | Escalation state machine (check-in text → call → follow-up → callback → friend) |
+| `api.py`, `controls.py` | Local dashboard API (`127.0.0.1:8765`); runtime settings saved in `state/settings.json` |
 | `caller.py` | Places an ElevenLabs outbound call and waits for the result |
 | `texter.py`, `intent.py` | iMessage on the Photon shared line; parse your texts |
-| `detector.py` | Active app / browser tab + rules and an LLM: on task or distracted? |
-| `webcam.py` | Optional: phone-in-hand check from the webcam (`USE_WEBCAM=1`) |
+| `detector.py`, `webcam.py` | On task or distracted: window / tab rules + Gemini; phone-in-hand from the webcam |
+| `tasks/` | Task sources: Canvas, Trello, Google Calendar |
 | `models.py`, `settings.py` | Shared types; ladder timings (`DEMO_MODE`) |
 | `agent/` | ElevenLabs agent prompt, opening lines, dashboard setup |
-| `call_me.py` | Places one test call, waits for it to end, prints the transcript |
-| `list_numbers.py` | Lists phone numbers imported into ElevenLabs with their `phone_number_id` |
-| `common.py` | Re-exports the shared helpers from `mom/config.py` and `mom/elevenlabs.py` |
-| `mom/config.py`, `mom/elevenlabs.py` | Load `.env`; call the ElevenLabs API with readable errors |
-| `mom/run.py`, `mom/triggers/` | Trigger framework (calendar feature in progress) |
-| `mom/calendar/` | Google Calendar sign-in + fetch, the briefing call (`python -m mom.calendar.brief`) |
-| `docs/agents/calendar-agent.md` | Calendar agent prompt + first message (pushed with `python -m mom.calendar.agent`) |
+| `web/` | The MomOS 2002 dashboard (React + Vite + TypeScript) |
+| `mom/` | Shared config and ElevenLabs client, the trigger framework, and the calendar briefing (`mom/calendar/`) |
+| `call_me.py`, `list_numbers.py` | One test call; list ElevenLabs phone numbers |
+| `docs/` | UI spec, feature docs, screenshots |
 | `.env.example` | Template for `.env` (secrets live only in `.env`, which is git-ignored) |
 
 ## Troubleshooting
@@ -120,3 +243,8 @@ corporate proxies and macOS's "Install Certificates.command" problem don't break
 | `422 Validation error` | Read the listed fields. Usually `to_number` isn't E.164 or an ID is wrong |
 | `Missing required dynamic variables` | The agent's prompt uses a `{{variable}}` the code didn't send. Use `caller.build_dynamic_variables()` |
 | Success, but phone didn't ring | ElevenLabs → **Conversations**: open the `conversation_id`. Then check the number's outbound SIP settings (address, TLS, Photon username/password) |
+| Dashboard says "Can't reach Mom" | `python main.py` isn't running, or another copy holds port 8765 |
+
+## Team
+
+Built at DubHacks '26 by **Jay Lai** ([@tiramisuice](https://github.com/tiramisuice)) and **Sean** ([@seanbenoit06](https://github.com/seanbenoit06)).
