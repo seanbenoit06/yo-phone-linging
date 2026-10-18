@@ -36,6 +36,8 @@ so **only edit the files you own** and talk to other modules only through the ty
 | `detector.py` | detector session | Read the active window / tab, decide on-task vs distracted. |
 | `webcam.py` | webcam session | Phone-in-hand detection with Perceptron. |
 | `agent/` | agent-prompt session | ElevenLabs agent prompt, first message, dashboard setup. |
+| `web/` | Codex | Local dashboard (React + Vite). Spec and API contract: `docs/UI_SPEC.md`. |
+| `api.py` | core | Local HTTP API for the dashboard (`127.0.0.1:8765`), served from `main.py`. |
 
 ## Contracts
 
