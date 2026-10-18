@@ -406,3 +406,38 @@ interface State {
 `mock.ts` must cover all of this: settings that toggle in memory, a monitor that ticks (checked / next),
 a placeholder camera image (generate an SVG or canvas image, no real photos in the repo), and a log stream
 that matches the scripted demo (`[detect] distracted: TikTok`, `[text] → ?`, `[call] 📞 nudge call starting`, ...).
+
+## 10. Guest call: let a judge get the call
+
+Goal: at judging, a judge types their own name, phone number and a class, and Mom calls **them** once, by
+name, about that class. This is the strongest live moment, so the flow must be fast and obvious.
+
+Voice only: iMessage can't reach numbers that aren't assigned to the Photon shared line, so a guest gets
+the call but not the texts. A guest call never changes the running session (like Test call).
+
+### Window: "Let Mom call you" (new desktop icon in the left sidebar, icon: phone with a plus)
+
+- **Name** (required, max 40 characters).
+- **Phone** (required). Accepts `(425) 555-1234`, `425-555-1234`, `+1 425 555 1234`; show it normalized as
+  `+1 (425) 555-1234` on blur. US numbers by default; a leading `+` allows other countries.
+- **What should you be doing?** (optional, max 120). A text field with suggestions from the class contexts in
+  `GET /api/tasks` (e.g. `MATH 208`, `INFO 200`) plus `CSE 143 homework`, `Studying for the midterm`.
+  Default when empty: `your homework`.
+- **What are you doing instead?** (optional): `TikTok` (default), `Instagram`, `YouTube`, `your phone`.
+- **Consent checkbox** (required): "I agree to get one phone call from Mom.exe, an AI, right now."
+- **Have Mom call me** button → inline confirm "Your phone will ring in a few seconds." → `POST /api/guest-call`.
+- Status line: sending → "Calling {name}…" while `call_in_progress` exists → "Call ended" with a link to Calls.
+- After a successful send, clear the phone field. Never put the number in `localStorage`, the URL or logs.
+- Disabled while any call is in progress (show why). Show the server's error text for 400 / 409 / 429.
+- Mock mode: simulate the call (call_started → ~15 s → call_ended with a short transcript that uses the guest's
+  name and class).
+
+### API
+
+| Method + path | Body | Response |
+|---|---|---|
+| `POST /api/guest-call` | `{ "name": "Alex", "phone": "(425) 555-1234", "goal": "CSE 143 homework", "distraction": "TikTok", "consent": true }` | `200 { ok: true }`; `400 { ok: false, error }` for a missing / invalid field or `consent` not `true`; `409` when a call is already in progress; `429` when a guest call was placed in the last 60 s |
+
+- The phone number is never returned, logged or shown unmasked anywhere (state, events, logs).
+- Timeline: `call_started` / `call_ended` events for a guest call carry `guest_name` in `data`, and their
+  `summary` says "Guest call to {name}". `State.call_in_progress` gains an optional `guest_name: string`.

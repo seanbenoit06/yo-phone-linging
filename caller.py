@@ -13,7 +13,7 @@ from models import CallResult, CallType
 
 RINGING_TIMEOUT_SECS = 30
 POLL_INTERVAL_SECS = 3
-MAX_WAIT_SECS = 15 * 60
+MAX_WAIT_SECS = 5 * 60
 MAX_CONSECUTIVE_POLL_ERRORS = 10
 # The outbound-call request can stay open while the phone rings, so allow longer than ringing.
 CALL_REQUEST_TIMEOUT_SECS = RINGING_TIMEOUT_SECS + 60

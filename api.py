@@ -31,7 +31,7 @@ FIRST_PAGE_EVENTS = 200   # GET /api/events?after=0
 MAX_LOG_LINES = 1000
 FIRST_PAGE_LOG_LINES = 300  # GET /api/logs?after=0
 PREVIEW_SECS = 10         # each GET /api/webcam/photo keeps the camera preview running this long
-COMMAND_WAIT_SECS = 6     # the dashboard client gives up after 8s
+COMMAND_WAIT_SECS = 12    # the dashboard client gives up after 15s
 MAX_BODY_BYTES = 16 * 1024
 MAX_GOAL_CHARS = 200
 MAX_FORCE_SECS = 30 * 60

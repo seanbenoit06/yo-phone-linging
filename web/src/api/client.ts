@@ -9,7 +9,7 @@ export type { ConnectionState } from "./poller";
 export function createRealApi(fetcher: typeof fetch = (...args) => fetch(...args)): ApiClient {
   async function request<T>(path: string, body?: Record<string, unknown>): Promise<T> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+    const timeout = setTimeout(() => controller.abort(), 15000); // api.py waits up to 12 s for the loop
     try {
       const response = await fetcher(`/api${path}`, {
         method: body === undefined ? "GET" : "POST",

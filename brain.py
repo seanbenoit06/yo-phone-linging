@@ -110,6 +110,12 @@ class Brain:
             actions.append(self._call(self.user_phone, call_type, now))
         return actions
 
+    def on_call_failed(self, now):
+        """The call never went out (API or network error): no texts, no missed call, wait before retrying."""
+        self.call_in_progress = False
+        self.no_calls_until = now + timedelta(seconds=max(60, settings.CALL_AFTER_DISTRACTED_SECS))
+        return []
+
     def on_call_ended(self, result, now):
         self.call_in_progress = False
         if self.goal is None:
@@ -174,7 +180,7 @@ class Brain:
         self._reset_session_state()
         self.goal = goal
         self.until = until
-        when = f" until {until.strftime('%-I:%M %p')}" if until else ""
+        when = f" until {until.strftime('%I:%M %p').lstrip('0')}" if until else ""  # %-I crashes on Windows
         return [SendText(f"OK {self.user_name}. {goal}{when}. Mom is watching. 👀")]
 
     def _end_session(self):

@@ -202,7 +202,11 @@ class MomLoop:
             call_id, result, error = self.call_results.get()
             call = self.calls.pop(call_id)
             self.record_call_ended(call, result, error)
-            if not call.test:  # a test call must never trigger a callback or a snitch call
+            if call.test:  # a test call must never trigger a callback or a snitch call
+                continue
+            if error:  # the call never went out, so don't count it as ignored
+                self.safely("brain", self.brain.on_call_failed, datetime.now())
+            else:
                 self.execute(self.safely("brain", self.brain.on_call_ended, result, datetime.now()))
 
         if not self.test_call_running():
@@ -219,7 +223,7 @@ class MomLoop:
             self.record("text_in", f"You: {message.text}", text=message.text)
             parsed = self.safely("intent", intent.parse, message.text, datetime.now())
             if parsed:
-                self.execute(self.on_intent(parsed))
+                self.execute(self.safely("brain", self.on_intent, parsed))
 
     def on_intent(self, parsed):
         """iMessages and dashboard commands both end up here."""
@@ -240,8 +244,11 @@ class MomLoop:
             activity, verdict = self.detect()
 
         if activity and verdict:
-            log("detect", f"{verdict.focus.value}: {activity.app} — {activity.title!r} ({verdict.reason})")
-            self.note_verdict(activity, verdict, tick)
+            # Looking at the dashboard itself is neutral: the brain still gets it (the distraction clock
+            # keeps running), but "Right now", Mom's Eyes and the log keep showing the last real thing.
+            if verdict.reason != getattr(detector, "DASHBOARD_REASON", None):
+                log("detect", f"{verdict.focus.value}: {activity.app} — {activity.title!r} ({verdict.reason})")
+                self.note_verdict(activity, verdict, tick)
             if not self.test_call_running():
                 self.execute(self.safely("brain", self.brain.on_verdict, activity, verdict, datetime.now()))
 
@@ -500,7 +507,7 @@ class MomLoop:
         self.forced = self.forced_until = None
         self.next_detect = 0.0
         until = iso(self.brain.until)
-        when = f" until {self.brain.until:%-I:%M %p}" if self.brain.until else ""
+        when = f" until {self.brain.until.strftime('%I:%M %p').lstrip('0')}" if self.brain.until else ""
         self.record("session_started", f"Session started: {self.brain.goal}{when}", goal=self.brain.goal, until=until)
 
     def session_ended(self, goal, reason):
