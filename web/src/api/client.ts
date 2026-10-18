@@ -72,6 +72,7 @@ export function createRealApi(fetcher: typeof fetch = (...args) => fetch(...args
     stopSession: () => request<CommandResult>("/session/stop", {}),
     notDistracted: () => request<CommandResult>("/not-distracted", {}),
     testCall: () => request<CommandResult>("/test-call", {}),
+    guestCall: (input) => request<CommandResult>("/guest-call", { name: input.name, phone: input.phone, goal: input.goal, distraction: input.distraction, consent: input.consent }),
     forceDistracted: (distraction, seconds) => request<CommandResult>("/demo/force-distracted", { distraction, seconds }),
   };
 }

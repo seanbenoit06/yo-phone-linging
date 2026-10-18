@@ -9,3 +9,5 @@ Work only in `web/`. Other sessions own the Python app and backend files. Keep c
 Use `/?mock=1` for independent development. There is no browser answer-call or hangup endpoint. Read the handoff's verification record before claiming backend services or Windows execution have been tested.
 
 For monitoring and editable controls, `../docs/UI_SPEC.md` section 9 is the governing v2 contract. Family Computer includes Mom's Eyes, Mom's Log, and acknowledged settings writes. Keep camera frames only in memory, stop photo polling when Eyes is hidden, and never save real camera photos or screenshots containing them in this repository. Only mock SVG camera scenes belong in UI evidence.
+
+For Guest Call, `../docs/UI_SPEC.md` section 10 is the governing v3 contract. Keep guest calls voice-only and independent of the current study session. Require explicit consent and inline confirmation. A phone number belongs only in transient form/request memory: never persist it in storage, URLs, logs, fixtures, or screenshots. Clear it after an acknowledged send. Never place a real guest call during verification unless Jay is present and explicitly agrees; mock verification is the default.

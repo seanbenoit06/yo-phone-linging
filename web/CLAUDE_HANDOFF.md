@@ -11,7 +11,7 @@ The functional Family Computer edition is the default at `/?mock=1`. This user d
 - Classic dashboard: `http://localhost:3000/?edition=classic&mock=1`
 - Original concept: `http://localhost:3000/style-lab.html?concept=momOS`
 
-The Family Computer v2 edition adds Mom’s Eyes, Mom’s Log, and six editable monitoring settings. The classic dashboard intentionally retains its original read-only settings block and theme picker; the Style room is unchanged.
+The Family Computer v2 edition adds Mom’s Eyes, Mom’s Log, and six editable monitoring settings. The v3 extension adds Guest Call under section 10 of the spec. The classic dashboard intentionally retains its original read-only settings block and theme picker; the Style room is unchanged.
 
 The production edition is API-wired. The Style room is a separate sample-state prototype; its scene controls and simulated call answer are not production API capabilities. `web/CLAUDE.md` is the frontend continuation entry point and directs future work to this handoff and the README.
 
@@ -35,10 +35,12 @@ The production edition is API-wired. The Style room is a separate sample-state p
 | `src/ClassicDashboard.tsx` | Preserved original dashboard and three switchable themes. |
 | `src/desktop/FamilyComputer.tsx` | Functional desktop shell, one dashboard/tasks polling tree, window navigation, real data wiring, and edition links. |
 | `src/desktop/DesktopWindow.tsx` | Shared window chrome and minimize/maximize presentation. |
-| `src/desktop/windowState.ts` | Window-state reducer for Today, Tasks, Calls, Eyes, Log, Settings, taskbar restoration, and Messenger visibility. |
+| `src/desktop/windowState.ts` | Window-state reducer for Today, Tasks, Calls, Guest Call, Eyes, Log, Settings, taskbar restoration, and Messenger visibility. |
 | `src/desktop/selectors.ts` | Selects the newest Messenger text events and presents them chronologically. |
 | `src/desktop/StudyControl.tsx` | Functional session entry and controls with actual deadlines and command feedback. |
 | `src/desktop/IncomingCall.tsx` | Honest phone-call status presentation; no browser answering. |
+| `src/desktop/GuestCall.tsx`, `guest.css` | Consent-first guest call form, inline confirmation, transient phone input, and observed call status. |
+| `src/desktop/guestModel.ts` | Phone parsing, form validation, task suggestions, private error rendering, attempt tracking, and stale-request guards. |
 | `src/desktop/MomEyes.tsx`, `eyes.css` | Screen/camera panes, module states, live readouts, and retro monitor/TV presentation. |
 | `src/desktop/eyesModel.ts` | Pure monitoring-state precedence, host-only URL display, method labels, timing, and displayed-photo age. |
 | `src/desktop/photoFeed.ts` | Three-second photo requests, abort/generation handling, and image object-URL lifecycle. |
@@ -89,6 +91,7 @@ Use the actual files as the source of truth if another session changes a name or
 | Done | `POST /api/session/stop` with `{}`, after inline confirmation. |
 | I'm actually working | `POST /api/not-distracted` with `{}`. |
 | Test call | `POST /api/test-call` with `{}`, after inline confirmation. |
+| Guest Call | `POST /api/guest-call` with `{ name, phone, goal, distraction, consent: true }`, after explicit consent and inline confirmation. |
 | Force distracted | `POST /api/demo/force-distracted` with `{ "distraction": "TikTok", "seconds": 60 }`. |
 | Change monitoring setting | `POST /api/settings` with one changed field; accepts the full acknowledged `SettingsResponse`. |
 
@@ -97,6 +100,16 @@ Use the actual files as the source of truth if another session changes a name or
 `State` includes `settings` and `monitor`. Hardware availability and unavailable reasons come from `GET /api/settings`, not from `State`. The additional reads are `GET /api/webcam/photo?t={timestamp}` (binary image; 404 means no photo) and `GET /api/logs?after={id}` (oldest-first incremental entries). Photo fetches use no-store behavior and generated SVG imagery in mock mode; never commit real camera imagery.
 
 Display all six stages correctly: `idle`, `watching`, `distracted`, `texted`, `calling`, and `waiting_callback`. Callback calls use `call_type: "callback"`; snitch is shown only when supported by received events. Render the shared Ladder only with a non-null session.
+
+### Guest Call lifecycle and privacy
+
+Guest Call uses the existing dashboard state/events/task polling tree. The shell passes the active-window flag, and the component is keyed by API source. Hiding the form cancels its confirmation; source changes discard stale form/request results. A phone is transient form/request data only. It must never enter local storage, URLs, logs, mock state, events, screenshots, or committed test fixtures. Test input is synthesized at runtime, and saved evidence must use mock mode after clearing the phone field.
+
+The final confirmation makes one POST, with no automatic retry. A successful acknowledgement clears the phone and consent. Because Python acknowledges a command before placing the call, the next state can still have `call_in_progress: null`. Track the submitted guest name and event cursor, wait for matching new call state/events, and only report completion after a matching end event or an observed active call disappearing. Disconnected snapshots cannot establish completion. The backend provides no separate dial/answer signal or guest call ID in the POST response.
+
+Guest calls use `call_type: "nudge"` plus optional `guest_name`; do not create a new call-type enum. Calls and transcripts identify the guest, and the floating call notification names them when another desktop window is active. Guest progress comes from `call_in_progress`/events, not `stage`: the backend remains `idle` without a study session. During a session, the mock exposes `calling` while retaining the underlying study stage and schedule.
+
+The mock guest timer is approximately 15 seconds, with a 60-second cooldown from acceptance. Its completion path emits a personalized transcript without guest texts or study-session promise/callback changes. Existing session calls that become due wait for the guest call to end. Real voice-provider failures normally produce a guest-tagged `call_ended`; a generic error event alone does not identify a guest attempt. Never automatically place another call when status is uncertain.
 
 ## Run locally
 
@@ -131,7 +144,15 @@ Mock tasks and synchronization status are samples. Their URLs are empty so Open 
 
 ## Verification record
 
-### Current v2 checks
+### Current v3 checks
+
+The v3 source passed **86/86 tests** and `npm run build` on macOS. The 27 added tests cover the guest client contract/errors, mock validation and 60-second cooldown, 15-second voice-only completion, independent session state and deferred session calls, guest labels, phone formatting/error redaction, consent validation, duplicate-request prevention, teardown, and delayed same-name call events.
+
+The native-browser mock run verified two guest calls using different names/course contexts; US formatting on blur; required consent; invalid phone feedback; confirmation/cancel; confirmation and consent clearing on hide; phone clearing after acceptance; active-call blocking; guest-specific floating notification; completion and personalized transcripts; and a visible cooldown error without another call. All saved images are mock-only with no phone input retained: [form](./screenshots/v3-guest-form.png), [calling](./screenshots/v3-guest-calling.png), [transcript](./screenshots/v3-guest-transcript.png). Layouts at nominal 1024, 1440, and 1920 px had no horizontal overflow; body/input/action text measured 16/17/19 px. Seven taskbar applications fit at 1024 px.
+
+The current real API at `127.0.0.1:8765` was unreachable. Real Guest Call showed its offline explanation and disabled action with an empty phone field. No real guest POST or communication was attempted, no real settings were changed, and no backend process was started/restarted. Real guest-call acknowledgement, live provider behavior, real transcript delivery, and actual Windows execution remain unverified. Jay must be present and explicitly agree before a real guest dial. The contract has no separate answer signal; Calling is a call-activity status. Source files were also reviewed against the backend's guest metadata and acknowledgement ordering without executing the communication endpoint.
+
+### Prior v2 checks
 
 The final v2 source passed `npm test` with **59/59 tests** and passed `npm run build` on macOS with Node.js 26 and npm 11.12. Automated coverage includes API paths/bodies, settings validation and concurrency, authoritative refresh after external changes, log cursors and buffers, unavailable/error monitoring states, photo 404/cancellation/object-URL cleanup, source isolation, and the existing scripted demo/window behavior.
 
@@ -184,7 +205,7 @@ The screen scanning animation is schedule-derived because the contract has no in
 
 ## Remaining integration work for Claude Code
 
-1. Read the latest Python API implementation without editing it and compare changes against `docs/UI_SPEC.md` sections 4 and 9. Preserve the already working idle reads/settings/photo/log integration; report contract drift to the backend owner.
+1. Read the latest Python API implementation without editing it and compare changes against `docs/UI_SPEC.md` sections 4, 9, and 10. Preserve the already working idle reads/settings/photo/log integration; report contract drift to the backend owner.
 2. Validate on Sean’s Windows machine using the same npm commands. Record actual Node/npm/browser versions, platform availability flags, and their displayed reasons.
 3. Coordinate a backend restart test with its owner to confirm settings persist. Restore the original configuration afterward. Do not restart another session’s process independently.
 4. Only with explicit authorization for real communications, run an active session that exercises screen/camera judgment and escalation. The completed idle controls/preview check did not place calls or send messages and does not authorize them. Keep browser call status observational; no answer/hangup API exists.
@@ -193,4 +214,4 @@ The screen scanning animation is schedule-derived because the contract has no in
 
 ## Ready-to-paste continuation prompt
 
-> Continue Mom.exe Family Computer v2 in `/Users/jay/Desktop/business/mom-exe` (use the equivalent checkout path on Windows). Read `~/.claude/CLAUDE.md`, applicable project instructions, `web/CLAUDE.md`, all of `docs/UI_SPEC.md` including section 9, `web/README.md`, and `web/CLAUDE_HANDOFF.md`, then inspect current changes. Preserve the selected retro desktop, Mom’s Eyes, Mom’s Log, editable Control Panel, classic dashboard, and Style room. Work only inside `web/`; other sessions own the backend. Keep repository text in English and explain progress in Traditional Chinese. The current source passed 59 tests and a production build; idle real-API settings/log/photo integration was checked and original settings restored. Focus on the documented remaining gaps, especially Windows and coordinated persistence/live-judgment checks, without claiming that mock results prove real services. Keep one dashboard polling tree, serialized settings writes with authoritative refresh, cursor-based logs, and photo requests limited to a visible Eyes window. Never save real photos, secrets, or phone numbers in the repo. Do not invent browser answer/hangup endpoints or trigger real communications without explicit authorization. Do not edit or restart the backend independently. Run appropriate tests/build/browser checks after changes and update the evidence accurately. Never use `git add -A`, and ask Jay before any push.
+> Continue Mom.exe Family Computer v3 in `/Users/jay/Desktop/business/mom-exe` (use the equivalent checkout path on Windows). Read `~/.claude/CLAUDE.md`, applicable project instructions, `web/CLAUDE.md`, all of `docs/UI_SPEC.md` including sections 9 and 10, `web/README.md`, and `web/CLAUDE_HANDOFF.md`, then inspect current changes. Preserve the selected retro desktop, Mom’s Eyes, Mom’s Log, editable Control Panel, Guest Call, classic dashboard, and Style room. Work only inside `web/`; other sessions own the backend. Keep repository text in English and explain progress in Traditional Chinese. The current source passed 86 tests and a production build; the full guest mock flow was checked. The real API was unreachable during v3 verification, and no real guest call was attempted. Prior v2 idle real-API settings/log/photo integration was checked and original settings restored. Focus on the documented remaining gaps, especially Windows, an explicitly authorized guest-phone test with Jay present, and coordinated persistence/live-judgment checks, without claiming that mock results prove real services. Keep one dashboard polling tree, serialized settings writes with authoritative refresh, cursor-based logs, and photo requests limited to a visible Eyes window. Never save real photos, secrets, or phone numbers in the repo. Do not invent browser answer/hangup endpoints or trigger real communications without explicit authorization. Do not edit or restart the backend independently. Run appropriate tests/build/browser checks after changes and update the evidence accurately. Never use `git add -A`, and ask Jay before any push.

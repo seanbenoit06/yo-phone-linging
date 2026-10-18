@@ -39,7 +39,7 @@ export interface State {
   verdict: null | { focus: Focus; distraction: string | null; reason: string };
   distracted_since: string | null;
   ladder: { text_after_secs: number; call_after_secs: number; callback_after_secs: number };
-  call_in_progress: null | { call_type: CallType; started_at: string };
+  call_in_progress: null | { call_type: CallType; started_at: string; guest_name?: string };
   callback_at: string | null;
   last_promise: string | null;
   missed_calls: number;
@@ -91,6 +91,7 @@ export interface TranscriptLine {
 
 export interface CallEndedData extends Record<string, unknown> {
   call_type: CallType;
+  guest_name?: string;
   conversation_id: string;
   answered: boolean;
   duration_secs: number;
@@ -130,6 +131,14 @@ export interface TaskResponse {
 
 export type SessionInput = string | { goal: string; until: string | null };
 
+export interface GuestCallInput {
+  name: string;
+  phone: string;
+  goal: string;
+  distraction: string;
+  consent: boolean;
+}
+
 export interface ApiClient {
   getState(): Promise<State>;
   getEvents(after: number): Promise<{ events: Event[] }>;
@@ -142,5 +151,6 @@ export interface ApiClient {
   stopSession(): Promise<CommandResult>;
   notDistracted(): Promise<CommandResult>;
   testCall(): Promise<CommandResult>;
+  guestCall(input: GuestCallInput): Promise<CommandResult>;
   forceDistracted(distraction: string, seconds: number): Promise<CommandResult>;
 }

@@ -42,6 +42,8 @@ flowchart LR
 - **Knows your work**: start a session straight from your **Canvas** assignments, **Trello** cards or
   **Google Calendar** events.
 - **Takes corrections**: say "I'm actually working" and she stops flagging that app for the session.
+- **Calls you, the judge**: in the **Guest Call** window, type your name, number and class, tick consent, and
+  Mom calls *you*. One voice call, no texts, and the number is never stored or shown.
 
 ## A real call
 
@@ -74,6 +76,10 @@ A retro "family computer" desktop that shows exactly what Mom sees and why she d
 ![Control Panel with real switches for screen monitoring, screenshots, camera, lock-in mode and demo timing](docs/images/control-panel.jpg)
 
 **Control Panel.** Real switches: screen monitoring, screenshot second look, camera, lock-in mode, demo timing, AI model.
+
+![Guest Call: a form with name, phone, class and a consent box](docs/images/guest-call.jpg)
+
+**Guest Call.** "Meet Mom. She has questions." A judge enters their own name, number and class, and Mom calls them.
 
 ## How it works
 

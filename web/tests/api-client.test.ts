@@ -108,3 +108,21 @@ test("camera timeout aborts the request and gives a readable timeout message", a
   context.mock.timers.tick(8000);
   await rejected;
 });
+
+test("guest client sends the exact voice-only payload and preserves server validation, conflict, and cooldown errors", async () => {
+  const request = { name: "Alex", phone: String(2) + "0".repeat(9), goal: "CSE 143 homework", distraction: "TikTok", consent: true };
+  let captured: { url: string; options?: RequestInit } | null = null;
+  const api = createRealApi(async (url, options) => {
+    captured = { url: String(url), options };
+    return Response.json({ ok: true });
+  });
+  assert.deepEqual(await api.guestCall(request), { ok: true });
+  assert.equal(captured!.url, "/api/guest-call");
+  assert.equal(captured!.options?.method, "POST");
+  assert.deepEqual(JSON.parse(String(captured!.options?.body)), request);
+  assert.ok(!captured!.url.includes(request.phone));
+  for (const [status, error] of [[400, "Consent is required."], [409, "Mom is already on the phone."], [429, "Try again in 45 s."]] as const) {
+    const rejected = createRealApi(async () => Response.json({ ok: false, error }, { status }));
+    await assert.rejects(rejected.guestCall(request), { message: error });
+  }
+});

@@ -15,6 +15,7 @@ export function getCallDetails(event: Event) {
   const data = event.data && typeof event.data === 'object' ? event.data : {};
   const labels: Record<string, string> = { nudge: 'A little nudge', callback: 'Promise check-in', snitch: 'Friend check-in' };
   const type = textValue(data.call_type);
+  const guestName = textValue(data.guest_name);
   const transcript: TranscriptLine[] = Array.isArray(data.transcript)
     ? data.transcript.flatMap((entry: unknown) => {
         if (!entry || typeof entry !== 'object') return [];
@@ -28,7 +29,8 @@ export function getCallDetails(event: Event) {
 
   return {
     type,
-    label: labels[type] ?? 'Mom call',
+    guestName,
+    label: guestName ? `Guest call to ${guestName}` : labels[type] ?? 'Mom call',
     answered: typeof data.answered === 'boolean' ? data.answered : null,
     duration: typeof data.duration_secs === 'number' && Number.isFinite(data.duration_secs) ? Math.max(0, data.duration_secs) : null,
     promise: textValue(data.promised_step),
@@ -60,12 +62,12 @@ export function CallTranscript({ event }: { event: Event }) {
           {call.excuse && <div className="call-takeaway call-excuse"><MessageCircle size={19} aria-hidden="true" /><div><span className="section-label">WHAT WAS GETTING IN THE WAY</span><p>“{call.excuse}”</p></div></div>}
         </div>
       )}
-      <div className="transcript-heading"><span className="section-label">THE CONVERSATION</span><span className="muted">Mom + you</span></div>
+      <div className="transcript-heading"><span className="section-label">THE CONVERSATION</span><span className="muted">Mom + {call.guestName || 'you'}</span></div>
       {call.transcript.length ? (
         <ol className="transcript-lines" aria-label="Call transcript">
           {call.transcript.map((line, index) => (
             <li className={`transcript-line transcript-${line.role}`} key={`${index}-${line.seconds}`}>
-              <div className="transcript-speaker"><strong>{line.role === 'agent' ? 'Mom' : line.role === 'user' ? 'You' : 'Speaker'}</strong><span className="transcript-time">{formatCallTime(line.seconds)}</span></div>
+              <div className="transcript-speaker"><strong>{line.role === 'agent' ? 'Mom' : line.role === 'user' ? call.guestName || 'You' : 'Speaker'}</strong><span className="transcript-time">{formatCallTime(line.seconds)}</span></div>
               <p>{line.message}</p>
             </li>
           ))}

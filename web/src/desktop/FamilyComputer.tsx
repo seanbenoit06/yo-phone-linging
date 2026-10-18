@@ -18,12 +18,18 @@ import { recentMessages } from './selectors';
 import { MomEyes } from './MomEyes';
 import { MomLog } from './MomLog';
 import { ControlSettings } from './ControlSettings';
+import { GuestCall } from './GuestCall';
 import './desktop.css';
+
+function GuestPhoneIcon(props: { size?: number; strokeWidth?: number }) {
+  return <Phone {...props}><path d="M16 5h6m-3-3v6" /></Phone>;
+}
 
 const applications = [
   { id: 'today' as const, title: 'Study Control', label: 'Today', icon: Home },
   { id: 'tasks' as const, title: 'My Homework', label: 'Tasks', icon: FolderOpen },
   { id: 'calls' as const, title: 'Call History', label: 'Calls', icon: Phone },
+  { id: 'guest' as const, title: 'Let Mom call you', label: 'Guest Call', icon: GuestPhoneIcon },
   { id: 'eyes' as const, title: "Mom's Eyes", label: 'Eyes', icon: Eye },
   { id: 'logs' as const, title: "Mom's Log", label: 'Log', icon: Terminal },
   { id: 'settings' as const, title: 'Control Panel', label: 'Settings', icon: Settings2 },
@@ -123,6 +129,7 @@ export function FamilyComputer() {
             {id === 'today' ? state ? <div className="fc-study-slot"><StudyControl key={mock ? 'mock' : 'real'} state={state} api={api} refresh={refresh} now={now} tasks={taskData.tasks} disabled={connection !== 'connected'} />{state.session && <Ladder state={state} now={now} events={events} />}<RightNow state={state} /></div> : <div className="fc-loading" aria-busy={loading} aria-label="Loading Study Control"><div className="skeleton skeleton-hero" /><p>{loading ? 'Mom is getting everything ready…' : 'Waiting for the local API. You can use the mock demo to explore.'}</p><button className="button" onClick={() => open('settings')}>Open Control Panel</button></div> :
               id === 'tasks' ? <div className="fc-secondary-content"><Tasks key={mock ? 'mock' : 'real'} tasks={taskData.tasks} sources={taskData.sources} loading={taskData.loading} error={taskData.error} api={api} refresh={refresh} onStarted={() => open('today')} now={now} /></div> :
               id === 'calls' ? <div className="fc-secondary-content"><Calls events={events} /></div> :
+              id === 'guest' ? <GuestCall key={mock ? 'mock' : 'real'} state={state} events={events} tasks={taskData.tasks} api={api} refresh={refresh} mock={mock} connected={connection === 'connected'} active={windows.active === 'guest'} onOpenCalls={() => open('calls')} /> :
               id === 'eyes' ? <MomEyes key={mock ? 'mock' : 'real'} state={state} settings={controls.data} settingsError={controls.errorKey ? null : controls.error} api={api} active={windows.active === 'eyes'} now={now} mock={mock} /> :
               id === 'logs' ? <MomLog key={mock ? 'mock' : 'real'} api={api} active={windows.active === 'logs'} mock={mock} /> :
               <div className="fc-secondary-content"><Settings state={state} mock={mock} onMockChange={changeMock} api={api} refresh={refresh} appearance={appearance} controls={<ControlSettings state={state} controller={controls} />} /></div>}
@@ -140,7 +147,7 @@ export function FamilyComputer() {
         </aside>
       </main>
     </div>
-    {state && <IncomingCall key={mock ? 'mock' : 'real'} state={state} now={now} mock={mock} onShowCalls={() => open('calls')} />}
+    {state && !(windows.active === 'guest' && state.call_in_progress?.guest_name) && <IncomingCall key={mock ? 'mock' : 'real'} state={state} now={now} mock={mock} onShowCalls={() => open('calls')} />}
     {menuOpen && <div className="fc-start-menu" ref={menuRef} id="mom-menu"><strong>MomOS 2002</strong><nav aria-label="Mom menu">{applications.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => open(id)}><Icon size={21} />{label}</button>)}<button onClick={() => { dispatch({ type: 'reset' }); setMenuOpen(false); }}><RotateCcw size={21} />Reset window layout</button><a href="/style-lab.html?concept=momOS"><Monitor size={21} />Style room</a><a href={`/?edition=classic&mock=${mock ? 1 : 0}`}><ArrowUpRight size={21} />Classic dashboard</a></nav><p>Your session continues when a window is minimized.</p></div>}
     <footer className="fc-taskbar">
       <button className="fc-menu-button" ref={menuButtonRef} type="button" aria-controls="mom-menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><Home size={23} fill="currentColor" /><strong>Mom Menu</strong></button>

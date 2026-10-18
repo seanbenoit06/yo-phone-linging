@@ -1,6 +1,6 @@
 # Mom.exe — Family Computer edition
 
-The selected Mom.exe interface is **Family Computer**, a retro desktop with teal wallpaper, beveled windows, a taskbar, and a Mom call-status window. It is the default dashboard at `/`. It uses the existing real/mock API contract and provides Today, Tasks, Calls, Mom’s Eyes, Mom’s Log, and editable Settings.
+The selected Mom.exe interface is **Family Computer**, a retro desktop with teal wallpaper, beveled windows, a taskbar, and a Mom call-status window. It is the default dashboard at `/`. It uses the existing real/mock API contract and provides Today, Tasks, Calls, Guest Call, Mom’s Eyes, Mom’s Log, and editable Settings.
 
 The original Flow, Mom, and Portal dashboard remains at `/?edition=classic`. The Style room remains available for comparing the original design studies. [CLAUDE.md](./CLAUDE.md) is the frontend continuation entry point; [CLAUDE_HANDOFF.md](./CLAUDE_HANDOFF.md) provides the implementation map, verification evidence, and a ready-to-paste continuation prompt.
 
@@ -47,6 +47,7 @@ The selected Family Computer layout supersedes the original spec's Flow default 
 - Open Today/Study Control to tell Mom a goal, monitor the current app and escalation stage, inspect activity, or end a session with inline confirmation.
 - Open Tasks/My Homework to see assignments and source health. **Start with Mom** offers **30 min**, **1 hour**, **2 hours**, and **Until due**, then returns to Today.
 - Open Calls for completed conversations, answers or missed calls, duration, promises, excuses, and transcripts.
+- Open Guest Call (phone-plus icon) to let a consenting guest receive one personalized AI call. See the Guest Call walkthrough below.
 - Open Eyes (eye icon) for **Mom's Eyes**: screen activity, verdict, detection method and timing, plus a memory-only camera preview. Camera images refresh every three seconds only while Eyes is visible. Outside a session the camera previews without judging.
 - Open Log (terminal icon) for **Mom's Log**: live colored entries, a source filter, Pause/Resume scrolling, and Clear view. Pausing scrolling does not stop receiving entries. Clear view does not erase backend logs.
 - Open Settings for immediate monitoring controls: Screen monitoring, Screenshot second look, Camera, Lock-in mode, Demo timing, and AI model. Each change shows Saving, Saved, or a readable error. Unsupported controls explain why; screenshots are disabled while screen monitoring is off. Your name remains read-only.
@@ -69,6 +70,20 @@ Family Computer implements section 9 of `docs/UI_SPEC.md`. The classic dashboard
 - **Log:** after the window is first opened, logs poll every second and retain the newest 1,000 lines. Minimize does not stop that polling. Pause/Resume affects scrolling only. Clear view clears the local buffer while retaining the cursor; backend history is unchanged.
 
 The camera can preview while idle. Camera judgment and screen monitoring require a session. Unavailable features, module errors, missing photos, and disabled monitoring have explicit states.
+
+## Guest Call
+
+Family Computer implements section 10 of `docs/UI_SPEC.md` through the **Guest Call** desktop icon and the **Let Mom call you** window.
+
+1. Open `/?mock=1`, then select **Guest Call** in the left navigation or Mom Menu.
+2. Enter the guest's name and phone, choose or type a class/goal, and choose a distraction. Class suggestions come from Tasks. An empty goal becomes `your homework`.
+3. Check **I agree to get one phone call from Mom.exe, an AI, right now.**
+4. Select **Have Mom call me**, review the inline confirmation, and confirm the call. Mock mode never contacts a phone.
+5. Watch the sending/waiting/calling status. After about 15 seconds in mock mode, open Calls to read the personalized transcript.
+
+US phone input is formatted on blur; a leading `+` accepts an international number. The phone field is cleared after the API acknowledges the request. It is never copied into local storage, the URL, event history, logs, or screenshots. Consent is not saved. Guest calls send no texts and do not replace the current study session or its promises. Any active call blocks another call, and the mock API mirrors the backend's 60-second guest-call cooldown. Server validation, busy, and cooldown errors are shown inline.
+
+An acknowledgement may arrive before the call appears in state. The UI waits for matching guest call state/events rather than treating an immediate empty call state as completion. It never retries a call automatically. In real mode the final confirmation places an actual call; **do not use it for testing unless Jay is present and explicitly agrees**.
 
 ## Run the scripted mock demo
 
@@ -121,6 +136,7 @@ Run `npm run dev`, then open `/?mock=0` or turn off Use mock API in Settings. Vi
 | `POST /api/session/stop` | `{}` after inline confirmation. |
 | `POST /api/not-distracted` | `{}` to accept the current app for this session. |
 | `POST /api/test-call` | `{}` after inline confirmation. |
+| `POST /api/guest-call` | `{ name, phone, goal, distraction, consent: true }` after consent and inline confirmation; voice-only, independent of the study session. |
 | `POST /api/demo/force-distracted` | `{ distraction, seconds }`. |
 
 System Status shows `imessage`, `detector`, `calls`, and `webcam`, with any supplied health message displayed inline. The classic dashboard offers those details on hover or keyboard focus. When the API becomes unreachable, the dashboard preserves the last successful snapshot, shows a banner, and retries automatically.
@@ -147,6 +163,16 @@ npm run preview
 Open `/?mock=1` for a standalone preview. Use `npm run dev` for Python integration; do not assume the production-preview server provides the development API proxy.
 
 ## Verification and remaining work
+
+The v3 source passed **86/86 tests** and `npm run build`. New coverage checks guest API bodies and 400/409/429 errors, validation/cooldown, session independence and call overlap, phone privacy, delayed and same-name events, duplicate requests, and source teardown.
+
+In the native browser, the mock guest flow was exercised with two different names and course contexts. Consent gating, validation, US formatting on blur, inline confirmation/cancel, hiding and restoring the form, phone clearing, active-call blocking, a readable cooldown error, and personalized Calls transcripts worked. The existing floating call notification named the guest when navigating away. Guest layout was checked at nominal widths of 1024, 1440, and 1920 pixels without horizontal overflow; the body font is 16 px, inputs 17 px, and primary action 19 px. All seven taskbar apps fit at 1024 px.
+
+During this v3 check, `127.0.0.1:8765` was unreachable. Real mode correctly disabled Guest Call and explained the offline state. No real guest POST, call, session, settings write, or backend restart was attempted. The earlier v2 live checks below are historical evidence, not a claim that the backend was reachable during v3 verification. An authorized real-phone test with Jay present and actual Windows execution remain outstanding. The API has no separate phone-answer event, so Calling reflects reported call activity rather than proof that someone answered.
+
+Mock screenshots, with empty phone fields: [Guest form](./screenshots/v3-guest-form.png), [Calling](./screenshots/v3-guest-calling.png), and [Personalized transcript](./screenshots/v3-guest-transcript.png).
+
+### Prior v2 verification
 
 The final v2 source passed **59/59 tests** with `npm test` and passed `npm run build`, on macOS using Node.js 26 and npm 11.12. The full approximately 100-second mock sequence was also repeated in the browser through nudge, callback, final text, and session completion; its final console had no warnings or errors. The [handoff](./CLAUDE_HANDOFF.md#verification-record) distinguishes current v2 evidence from historical pre-v2 checks.
 

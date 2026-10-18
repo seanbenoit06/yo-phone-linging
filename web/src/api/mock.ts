@@ -1,4 +1,4 @@
-import type { ApiClient, CallEndedData, CallType, Event, EventKind, LogLine, SessionInput, Settings, SettingsPatch, SettingsResponse, State, Task, TranscriptLine } from "./types";
+import type { ApiClient, CallEndedData, CallType, Event, EventKind, GuestCallInput, LogLine, SessionInput, Settings, SettingsPatch, SettingsResponse, State, Task, TranscriptLine } from "./types";
 
 const PROMISE = "open your laptop and find the file";
 const EXCUSE = "I don't know how to start";
@@ -17,9 +17,28 @@ export const NUDGE_TRANSCRIPT: TranscriptLine[] = [
 
 type ActionKind = "distraction" | "text" | "nudge" | "call_end" | "callback" | "focus" | "deadline";
 type Action = { at: number; kind: ActionKind; run: () => void };
+type GuestCall = { name: string; goal: string; distraction: string; started_at: string; ends_at: number };
 
 function copy<T>(value: T): T {
   return structuredClone(value);
+}
+
+function parseGuest(input: GuestCallInput): Pick<GuestCall, "name" | "goal" | "distraction"> {
+  if (!input || input.consent !== true) throw new Error("Tick the box to agree to one call from Mom.exe, an AI.");
+  if (typeof input.name !== "string" || !input.name.trim() || Array.from(input.name.trim()).length > 40) throw new Error("Enter a name (up to 40 characters).");
+  if (/[{}<>\p{C}\p{Zl}\p{Zp}]/u.test(input.name)) throw new Error("Use letters, numbers and spaces in the name.");
+  if (typeof input.phone !== "string" || !input.phone.trim()) throw new Error("Enter a phone number.");
+  const digits = input.phone.replace(/\D/g, "");
+  const validPhone = input.phone.trim().startsWith("+")
+    ? digits.length >= 8 && digits.length <= 15 && digits[0] !== "0"
+    : (digits.length === 10 && !"01".includes(digits[0])) || (digits.length === 11 && digits[0] === "1");
+  if (!validPhone) throw new Error("Enter a valid US number, or start with + and the country code.");
+  function optional(value: unknown, field: string, limit: number, fallback: string) {
+    if (value === undefined || value === null || value === "") return fallback;
+    if (typeof value !== "string" || Array.from(value.trim()).length > limit || /[\p{C}\p{Zl}\p{Zp}]/u.test(value)) throw new Error(`${field} must be text up to ${limit} characters.`);
+    return value.trim() || fallback;
+  }
+  return { name: input.name.trim(), goal: optional(input.goal, "goal", 120, "your homework"), distraction: optional(input.distraction, "distraction", 40, "TikTok") };
 }
 
 function parseSession(input: SessionInput, now: number): { goal: string; until: string | null } {
@@ -70,6 +89,8 @@ export function createMockApi(now: () => number = Date.now, options: MockOptions
   let screenChecks = 0;
   let callbackStartedAt: number | null = null;
   let activeCallWithCallback = false;
+  let guestCall: GuestCall | null = null;
+  let lastGuestCallAt = -Infinity;
   const available = { screen: options.available?.screen ?? true, webcam: options.available?.webcam ?? true };
   const unavailableReason = {
     ...(!available.screen ? { screen: options.unavailable_reason?.screen || "Screen monitoring is not available on this computer." } : {}),
@@ -263,6 +284,10 @@ export function createMockApi(now: () => number = Date.now, options: MockOptions
   }
 
   function startCall(callType: CallType, withCallback: boolean) {
+    if (guestCall) {
+      schedule(callType === "callback" ? "callback" : "nudge", Math.max(0, (guestCall.ends_at - time) / 1000), () => startCall(callType, withCallback));
+      return;
+    }
     cancel("text", "nudge", "callback");
     state.stage = "calling";
     state.callback_at = null;
@@ -319,10 +344,36 @@ export function createMockApi(now: () => number = Date.now, options: MockOptions
     time = target;
   }
 
+  function finishGuestCall() {
+    if (!guestCall) return;
+    const completed = guestCall;
+    guestCall = null;
+    const data: CallEndedData = {
+      call_type: "nudge",
+      guest_name: completed.name,
+      conversation_id: `mock-guest-${nextId}`,
+      answered: true,
+      duration_secs: 15,
+      promised_step: null,
+      excuse: null,
+      summary: `Guest call to ${completed.name} about ${completed.goal}.`,
+      transcript: [
+        { role: "agent", time_in_call_secs: 0, message: `${completed.name}! ${completed.distraction} again? You should be doing ${completed.goal}.` },
+        { role: "user", time_in_call_secs: 5, message: `Okay, Mom. I will start ${completed.goal} now.` },
+        { role: "agent", time_in_call_secs: 9, message: `Good, ${completed.name}. Just open the assignment and take one small step. Mom believes in you.` },
+        { role: "user", time_in_call_secs: 13, message: "I can do that. Bye, Mom." },
+      ],
+    };
+    emit("call_ended", `Guest call to ${completed.name} ended after 0:15`, data);
+  }
+
   function advance() {
     const target = Math.max(time, now());
-    while (Math.min(actions[0]?.at ?? Infinity, nextMonitorAt) <= target) {
-      if ((actions[0]?.at ?? Infinity) <= nextMonitorAt) {
+    while (Math.min(actions[0]?.at ?? Infinity, nextMonitorAt, guestCall?.ends_at ?? Infinity) <= target) {
+      if (guestCall && guestCall.ends_at <= Math.min(actions[0]?.at ?? Infinity, nextMonitorAt)) {
+        tickTo(guestCall.ends_at);
+        finishGuestCall();
+      } else if ((actions[0]?.at ?? Infinity) <= nextMonitorAt) {
         const next = actions.shift()!;
         tickTo(next.at);
         next.run();
@@ -374,7 +425,10 @@ export function createMockApi(now: () => number = Date.now, options: MockOptions
   log("main", "Mom.exe mock started. No real messages, calls, camera, or screenshots.");
 
   return {
-    async getState() { advance(); return copy(state); },
+    async getState() {
+      advance();
+      return copy({ ...state, stage: guestCall && state.session ? "calling" as const : state.stage, call_in_progress: guestCall ? { call_type: "nudge" as const, started_at: guestCall.started_at, guest_name: guestCall.name } : state.call_in_progress });
+    },
     async getEvents(after) { advance(); return { events: copy(events.filter((event) => event.id > after)) }; },
     async getSettings() { advance(); return settingsResponse(); },
     async updateSettings(patch) {
@@ -430,7 +484,7 @@ export function createMockApi(now: () => number = Date.now, options: MockOptions
     async startSession(input) {
       advance();
       const parsed = parseSession(input, time);
-      if (state.call_in_progress) throw new Error("Finish the current call before starting a new session.");
+      if (state.call_in_progress || guestCall) throw new Error("Finish the current call before starting a new session.");
       if (state.session) endSession("stopped");
       actions = [];
       ignoredApps.clear();
@@ -462,15 +516,27 @@ export function createMockApi(now: () => number = Date.now, options: MockOptions
     },
     async testCall() {
       advance();
-      if (state.call_in_progress) throw new Error("Mom is already on a call. Try again when it ends.");
+      if (state.call_in_progress || guestCall) throw new Error("Mom is already on a call. Try again when it ends.");
       cancel("distraction", "text", "nudge", "focus", "callback");
       startCall("nudge", Boolean(state.session));
+      return { ok: true };
+    },
+    async guestCall(input) {
+      advance();
+      const parsed = parseGuest(input);
+      if (state.call_in_progress || guestCall) throw new Error("Mom is already on the phone. Try again when the call ends.");
+      const wait = 60_000 - (time - lastGuestCallAt);
+      if (wait > 0) throw new Error(`Mom just called someone. Try again in ${Math.ceil(wait / 1000)} s.`);
+      lastGuestCallAt = time;
+      guestCall = { ...parsed, started_at: iso(), ends_at: time + 15_000 };
+      state.stats.calls_made += 1;
+      emit("call_started", `Guest call to ${parsed.name}`, { call_type: "nudge", guest_name: parsed.name, opening_line: `${parsed.name}! ${parsed.distraction} again? You should be doing ${parsed.goal}.` });
       return { ok: true };
     },
     async forceDistracted(distraction, seconds) {
       advance();
       if (!state.session) throw new Error("Start a session before forcing a distraction.");
-      if (state.call_in_progress) throw new Error("Wait for the current call to finish before forcing a distraction.");
+      if (state.call_in_progress || guestCall) throw new Error("Wait for the current call to finish before forcing a distraction.");
       if (!distraction.trim()) throw new Error("Enter the name of a distracting app.");
       if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 3600) throw new Error("Choose a duration between 1 and 3,600 seconds.");
       cancel("callback");
