@@ -25,6 +25,8 @@ from common import fail, load_config
 from models import Activity, CallResult, CallType, Focus, IntentKind, PlaceCall, SendText, Verdict
 
 LOOP_SLEEP_SECS = 0.5
+# Ignore a webcam result older than this (a few missed checks), e.g. after the thread hiccups.
+CAM_STALE_SECS = settings.DETECT_EVERY_SECS * 3 + 5
 # Which dashboard health dot a failing step turns red.
 MODULE_OF_SOURCE = {"text": "imessage", "detect": "detector", "call": "calls", "webcam": "webcam"}
 # The test call needs something to talk about when no session is running (same as call_me.py).
@@ -104,6 +106,10 @@ class MomLoop:
         self.last_focus = None             # a verdict event is recorded only when this changes
         self.forced_until = None           # monotonic time; POST /api/demo/force-distracted
         self.forced = None                 # (Activity, Verdict) used instead of the detector
+        # The webcam check takes ~3 s, so it runs in its own thread (watch_webcam) and the loop
+        # only reads its latest result; otherwise texts and dashboard commands would stall.
+        self.cam_lock = threading.Lock()
+        self.cam_result = None             # (monotonic time, Verdict or None, Exception or None)
         # "source.function" → error message, until that same function succeeds again.
         # Drives the health dots, and records each new error on the timeline only once.
         self.failing = {}
@@ -123,6 +129,8 @@ class MomLoop:
                  "   Another `python main.py` is probably still running. Stop it (Ctrl+C),\n"
                  "   or set API_PORT to a free port in .env.")
         threading.Thread(target=warm_tasks_cache, name="tasks-warm-up", daemon=True).start()
+        if self.webcam:
+            threading.Thread(target=self.watch_webcam, name="webcam", daemon=True).start()
         log("main", f"Mom.exe is up (demo mode: {settings.DEMO_MODE}, webcam: {bool(self.webcam)}). "
                     'Text the agent to start, e.g. "Finishing CSE homework by 9 PM".')
         log("api", f"dashboard API on http://{HOST}:{port}/api/state")
@@ -198,10 +206,34 @@ class MomLoop:
 
         # The webcam only ever adds evidence: phone in hand beats an on-task screen.
         if self.webcam:
-            cam = self.safely("webcam", self.webcam.check)
+            cam = self.safely("webcam", self.latest_webcam_verdict)
             if cam and cam.focus == Focus.DISTRACTED:
                 activity, verdict = Activity(app="webcam", title="phone in hand"), cam
         return activity, verdict
+
+    def watch_webcam(self):
+        """Background thread: check the webcam while a session runs; keep only the latest result."""
+        while True:
+            if not self.brain.goal:
+                time.sleep(1)
+                continue
+            try:
+                cam, error = self.webcam.check(), None
+            except Exception as err:  # noqa: BLE001  (check() shouldn't raise, but never kill this thread)
+                cam, error = None, err
+            with self.cam_lock:
+                self.cam_result = (time.monotonic(), cam, error)
+            time.sleep(settings.DETECT_EVERY_SECS)
+
+    def latest_webcam_verdict(self):
+        """The webcam thread's latest Verdict, or None if it's too old. Raises its error, for safely()."""
+        with self.cam_lock:
+            result = self.cam_result
+        if result is None or time.monotonic() - result[0] > CAM_STALE_SECS:
+            return None
+        if result[2] is not None:
+            raise result[2]
+        return result[1]
 
     def execute(self, actions, test=False):
         for action in actions or []:
@@ -342,6 +374,8 @@ class MomLoop:
 
     def session_started(self):
         self.session_started_at = datetime.now()
+        with self.cam_lock:
+            self.cam_result = None  # a phone seen before this session started doesn't count
         self.last_detect_tick = time.monotonic()
         self.activity = self.verdict = self.last_focus = None
         self.forced = self.forced_until = None

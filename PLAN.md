@@ -40,12 +40,15 @@ iMessage (texter/intent) + screen (detector) + webcam (optional)
 - [x] iMessage: `texter.py` + `intent.py` (Photon shared line, proactive "?" verified)
 - [x] Detector: `detector.py` (window / tab title + rules + Gemini, iPhone Mirroring counts as the phone)
 - [x] Agent prompt: `agent/` (nudge / callback / snitch, `opening_line`, Data Collection), tested on real calls
-- [ ] Webcam: `webcam.py` (backend being benchmarked)
-- [ ] Calendar: Mom calls about upcoming meetings / deadlines → [docs/features/calendar.md](docs/features/calendar.md)
-- [ ] End-to-end demo run with `DEMO_MODE=1`
+- [x] Webcam: `webcam.py` (Gemini; 6/6 phones in frame, 0 false alarms), runs in a background thread
+- [x] Screenshot second look when a title is unclear (`DETECTOR_VISION=1`)
+- [x] Calendar daily briefing call (Sean) → [docs/features/calendar.md](docs/features/calendar.md)
+- [x] Dashboard: `web/` (Family Computer edition) + `api.py`, tested against the live API
+- [x] Tasks: Canvas (browser cookie, UW blocks tokens), Trello (one board, read-only), Google Calendar (next 7 days)
+- [ ] End-to-end demo run with `DEMO_MODE=1` (dashboard → "?" text → call → follow-up → callback)
 
 ### 💡 Later
-- [ ] Wire calendar triggers into `main.py`
+- [ ] Run the calendar briefing from `main.py` on a schedule
 - [ ] Persist excuses across runs (`memory.json`, maybe MLH Backboard)
 - [ ] Rehearse the demo, Devpost, make the repo public
 - [ ] VEYZL audit on a PR, GoDaddy domain

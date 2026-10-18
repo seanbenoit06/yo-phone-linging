@@ -12,6 +12,38 @@ An AI agent that phone-calls you when you procrastinate.
 - The screen feature is already implemented by `detector.py` + `brain.py`, not `mom/triggers/screen.py`.
 - `common.py` only re-exports `mom/config.py` + `mom/elevenlabs.py`, so there is one implementation.
 
+## Run the whole app (start here)
+
+1. Python: `uv venv`, activate it (`source .venv/bin/activate`, Windows: `.venv\Scripts\Activate.ps1`),
+   `uv pip install -r requirements.txt` (`-r requirements-dev.txt` for tests).
+2. `.env`: `cp .env.example .env` and fill it in (each key has a comment). A teammate can send a filled
+   `.env` privately; then change `MY_PHONE_NUMBER` and `USER_NAME` to your own. Never commit or paste it.
+
+   | Needed for | Keys / files |
+   |---|---|
+   | Calls | `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, `ELEVENLABS_PHONE_NUMBER_ID`, `MY_PHONE_NUMBER`, `USER_NAME` |
+   | iMessage | `PHOTON_PROJECT_ID`, `PHOTON_API_KEY` (your number must be assigned to the Photon shared line) |
+   | Screen + webcam judging | `GEMINI_API_KEY` |
+   | Tasks | `CANVAS_SESSION_COOKIE` (expires; copy it again), `TRELLO_*`, Google `credentials.json` + `python -m mom.calendar.gcal` once (saves `token.json`) |
+   | Switches | `DEMO_MODE`, `DETECTOR_VISION`, `DETECTOR_MODE`, `USE_WEBCAM`, `FRIEND_PHONE_NUMBER`, `CALENDAR_IDS` |
+
+3. Terminal 1: `python main.py` (the app, plus the dashboard API on `127.0.0.1:8765`).
+4. Terminal 2: `cd web && npm install && npm run dev` → `http://localhost:3000/?mock=0`
+   (`?mock=1` plays a scripted demo without the Python app).
+5. Start a session in the dashboard (`MATH 208 homework until 11 PM`) or by iMessage. With `DEMO_MODE=1`:
+   distracted 10 s → "?" text, 25 s → call, callback 45 s after a promise.
+
+**Real side effects.** A session texts and calls `MY_PHONE_NUMBER`; **Test call** rings it right away;
+calls cost about $0.10 per minute. Agent sessions: ask the user before anything that texts or calls.
+
+**Windows.** Calls, iMessage, the dashboard, tasks and calendar work. `detector.py` (osascript) and
+`webcam.py` (ffmpeg avfoundation) are macOS-only: on Windows the detector returns no activity, so keep
+`USE_WEBCAM=0` and drive the ladder with **Settings → Demo controls → Force distracted**.
+
+**Before pushing.** `python -m pytest -q tests`, `cd web && npm test && npm run build`. `.env`,
+`credentials.json` and `token.json` are git-ignored; stage files by name, never `git add -A`.
+What's done and what's next: `PLAN.md`.
+
 ## First: figure out which feature you're working on
 
 | Feature | Owned files | Doc |

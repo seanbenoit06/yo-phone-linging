@@ -40,14 +40,24 @@ python call_me.py --dry-run        # print what would be sent, no call
 python call_me.py
 python call_me.py --goal "CSE homework" --distraction "TikTok"
 
-# 5. Run Mom.exe
+# 5. Run Mom.exe (keep this terminal open; the dashboard API is on 127.0.0.1:8765)
 python main.py
+
+# 6. In a second terminal: the dashboard (Node.js 22.12+ or 24+)
+cd web
+npm install
+npm run dev                        # then open http://localhost:3000/?mock=0
 ```
 
-Then text the agent on iMessage, e.g. `Finishing CSE homework by 9 PM`. Mom watches your screen,
-texts `?` when you drift, calls you if you keep going, texts a follow-up quoting your promise,
-calls back later, and calls `FRIEND_PHONE_NUMBER` if you ignore her.
+Start a session from the dashboard (type `MATH 208 homework until 11 PM`, or pick a task and
+**Start with Mom**), or text the agent on iMessage. Mom watches your screen (and webcam with
+`USE_WEBCAM=1`), texts `?` when you drift, calls you if you keep going, texts a follow-up quoting
+your promise, calls back later, and calls `FRIEND_PHONE_NUMBER` if you ignore her.
 Set `DEMO_MODE=1` in `.env` so the whole ladder fits in a 3-minute demo.
+`http://localhost:3000/?mock=1` plays a scripted demo without the Python app.
+
+Screen detection (`detector.py`) and the webcam (`webcam.py`) are macOS-only for now. On Windows,
+keep `USE_WEBCAM=0` and use the dashboard's **Settings → Demo controls → Force distracted**.
 
 ### Calendar briefing (Google Calendar)
 

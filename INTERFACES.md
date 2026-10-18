@@ -34,7 +34,7 @@ so **only edit the files you own** and talk to other modules only through the ty
 | `call_me.py`, `list_numbers.py`, `common.py` | core | CLI tools and shared HTTP / `.env` helpers. |
 | `texter.py`, `intent.py` | iMessage session | Send / receive iMessages, parse the user's texts. |
 | `detector.py` | detector session | Read the active window / tab, decide on-task vs distracted. |
-| `webcam.py` | webcam session | Phone-in-hand detection with Perceptron. |
+| `webcam.py` | webcam session | Phone-in-hand detection with Gemini (`USE_WEBCAM=1`, macOS). `main.py` runs it in a background thread. |
 | `agent/` | agent-prompt session | ElevenLabs agent prompt, first message, dashboard setup. |
 | `tasks/` | canvas session | Task sources (`tasks/canvas.py` now; Trello / Calendar later) → `list[Task]`. |
 | `web/` | Codex | Local dashboard (React + Vite). Spec and API contract: `docs/UI_SPEC.md`. |
