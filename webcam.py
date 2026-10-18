@@ -1,9 +1,12 @@
-"""Catch the user picking up their phone, using the laptop webcam.
+"""Catch the user on their phone, using the laptop webcam.
 
-check() takes one photo, asks Perceptron's vision model whether the person is
-looking down at a phone in their hand, and returns a models.Verdict.
+check() takes one photo, asks Gemini whether the person is on their phone, and returns a models.Verdict.
 The photo only lives in memory (ffmpeg pipes it straight to us, nothing is written to disk)
 and is dropped when check() returns.
+
+Gemini won a benchmark against YOLO26, MediaPipe gaze tracking, Jev 1.14, OpenAI luna-decisions and
+Perceptron Mk1.5: it caught 6/6 phones held in frame with 0/9 false alarms. A phone held out of frame
+(in the lap) is not reliably caught by any of them, so in the demo hold the phone at chest height.
 
 The camera is opened by name, not by index: with Continuity Camera on, macOS also lists the
 iPhone as a webcam and the index order isn't stable, so index 0 can turn out to be the phone.
@@ -25,8 +28,8 @@ from dotenv import load_dotenv
 from common import ENV_FILE, load_config
 from models import Focus, Verdict
 
-API_URL = "https://api.perceptron.inc/v1/chat/completions"
-MODEL = "perceptron-mk1.5"
+GEMINI_MODEL = "gemini-3.5-flash-lite"  # same model and key (GEMINI_API_KEY) as detector.py
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 DEFAULT_CAMERA_NAME = "MacBook Pro Camera"  # see `ffmpeg -f avfoundation -list_devices true -i ""`
 TIME_BUDGET_SECS = 4.5   # check() must return within 5s; keep some slack
 MIN_API_SECS = 1.0       # always leave the API at least this much of the budget
@@ -36,9 +39,11 @@ MAX_IMAGE_WIDTH = 640    # a smaller photo uploads faster and is plenty to spot 
 TEST_EVERY_SECS = 3
 
 PROMPT = (
-    "This is a webcam photo of someone sitting at a laptop. "
-    "Are they using a phone right now, meaning a phone is in their hand and they are looking down at it? "
-    "A phone lying on the desk does not count. "
+    "This is a webcam photo of someone sitting at a laptop. Are they on their phone right now? "
+    "Yes if a phone is in their hand and they look at it, OR if their head is tilted down and their eyes look "
+    "down past the laptop toward their hands or lap, the way people look when scrolling a phone held out of view. "
+    "No if they look at the laptop screen or the camera, or look down at the keyboard while typing, "
+    "or if a phone just lies on the desk. "
     "Answer in JSON. Keep reason under 15 words."
 )
 
@@ -46,11 +51,11 @@ RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
         "person_visible": {"type": "boolean"},
-        "holding_phone": {"type": "boolean"},
-        "looking_at_phone": {"type": "boolean"},
+        "phone_in_hand": {"type": "boolean"},
+        "on_phone": {"type": "boolean"},
         "reason": {"type": "string"},
     },
-    "required": ["person_visible", "holding_phone", "looking_at_phone", "reason"],
+    "required": ["person_visible", "phone_in_hand", "on_phone", "reason"],
     "additionalProperties": False,
 }
 
@@ -58,7 +63,7 @@ load_dotenv(ENV_FILE)
 
 
 def check() -> Verdict:
-    """Photo → Perceptron → Verdict. Never raises; anything that goes wrong is UNSURE."""
+    """Photo → Gemini → Verdict. Never raises; anything that goes wrong is UNSURE."""
     started = time.monotonic()
     try:
         return _check(started)
@@ -67,18 +72,18 @@ def check() -> Verdict:
 
 
 def _check(started):
-    api_key = os.getenv("PERCEPTRON_API_KEY", "").strip()
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key or api_key.startswith("your_"):
-        return _unsure("PERCEPTRON_API_KEY is missing in .env")
+        return _unsure("GEMINI_API_KEY is missing in .env")
 
     jpeg = _take_photo(timeout=TIME_BUDGET_SECS - MIN_API_SECS)
     time_left = TIME_BUDGET_SECS - (time.monotonic() - started)
-    answer = _ask_perceptron(api_key, jpeg, timeout=time_left)
+    answer = _ask_gemini(api_key, jpeg, timeout=time_left)
     reason = f"webcam: {answer['reason']}"
 
     if not answer["person_visible"]:
         return Verdict(focus=Focus.UNSURE, reason=f"{reason} (no one in frame)")
-    if answer["holding_phone"] and answer["looking_at_phone"]:
+    if answer["on_phone"]:
         return Verdict(focus=Focus.DISTRACTED, distraction="your phone", reason=reason)
     return Verdict(focus=Focus.ON_TASK, reason=reason)
 
@@ -114,47 +119,35 @@ def _take_photo(timeout):
     return result.stdout
 
 
-def _ask_perceptron(api_key, jpeg, timeout):
-    """Send the photo to Perceptron and return the parsed JSON answer (see RESPONSE_SCHEMA)."""
-    data_url = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")
+def _ask_gemini(api_key, jpeg, timeout):
+    """Send the photo to Gemini and return the parsed JSON answer (see RESPONSE_SCHEMA)."""
     body = {
-        "model": MODEL,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                    {"type": "text", "text": PROMPT},
-                ],
-            }
-        ],
-        "reasoning_effort": "none",  # thinking would blow the 5s budget
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {"name": "phone_check", "strict": True, "schema": RESPONSE_SCHEMA},
+        "contents": [{"role": "user", "parts": [
+            {"inlineData": {"mimeType": "image/jpeg", "data": base64.b64encode(jpeg).decode("ascii")}},
+            {"text": PROMPT},
+        ]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseJsonSchema": RESPONSE_SCHEMA,
+            "thinkingConfig": {"thinkingLevel": "minimal"},  # more thinking would blow the 5s budget
         },
-        "max_completion_tokens": 200,
     }
 
     try:
-        response = requests.post(
-            API_URL,
-            headers={"Authorization": f"Bearer {api_key}"},
-            json=body,
-            timeout=timeout,
-        )
+        response = requests.post(GEMINI_URL, headers={"x-goog-api-key": api_key}, json=body, timeout=timeout)
     except requests.exceptions.Timeout:
-        raise RuntimeError(f"Perceptron didn't answer within {timeout:.1f}s")
+        raise RuntimeError(f"Gemini didn't answer within {timeout:.1f}s")
     except requests.exceptions.ConnectionError:
-        raise RuntimeError("couldn't reach api.perceptron.inc (internet / VPN?)")
+        raise RuntimeError("couldn't reach generativelanguage.googleapis.com (internet / VPN?)")
 
-    if response.status_code == 401:
-        raise RuntimeError("401: Perceptron rejected PERCEPTRON_API_KEY")
     if not response.ok:
         raise RuntimeError(f"HTTP {response.status_code}: {_error_message(response)}")
 
-    content = response.json()["choices"][0]["message"]["content"]
-    return json.loads(content)
+    data = response.json()
+    if not data.get("candidates"):
+        raise RuntimeError(f"Gemini gave no answer: {data.get('promptFeedback', data)}")
+    parts = data["candidates"][0]["content"]["parts"]
+    return json.loads([part for part in parts if "text" in part][-1]["text"])
 
 
 def _error_message(response):
@@ -169,7 +162,7 @@ def _unsure(reason):
 
 
 if __name__ == "__main__":
-    load_config(["PERCEPTRON_API_KEY"])  # exits with a clear message if the key is missing
+    load_config(["GEMINI_API_KEY"])  # exits with a clear message if the key is missing
     print(f"Checking the webcam every {TEST_EVERY_SECS}s. Pick up your phone, put it down. Ctrl+C to stop.\n")
     try:
         while True:
