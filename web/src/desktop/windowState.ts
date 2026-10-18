@@ -1,4 +1,4 @@
-export type WindowId = 'today' | 'tasks' | 'calls' | 'settings';
+export type WindowId = 'today' | 'tasks' | 'calls' | 'eyes' | 'logs' | 'settings';
 export interface WindowState {
   open: WindowId[];
   active: WindowId | null;

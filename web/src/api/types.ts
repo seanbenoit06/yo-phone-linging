@@ -3,6 +3,32 @@ export type Focus = "on_task" | "distracted" | "unsure";
 export type CallType = "nudge" | "callback" | "snitch";
 export type ModuleHealth = { status: "ok" | "error" | "off"; message?: string };
 
+export interface Settings {
+  screen_monitoring: boolean;
+  screenshots: boolean;
+  webcam: boolean;
+  detector_mode: "lockin" | "relaxed";
+  detector_llm: "gemini" | "jev";
+  demo_mode: boolean;
+}
+
+export type SettingsPatch = Partial<Settings>;
+
+export interface SettingsResponse {
+  settings: Settings;
+  available: { screen: boolean; webcam: boolean };
+  unavailable_reason: { screen?: string; webcam?: string };
+}
+
+export interface LogLine {
+  id: number;
+  at: string;
+  source: string;
+  message: string;
+}
+
+export interface LogsResponse { lines: LogLine[] }
+
 export interface State {
   now: string;
   user_name: string;
@@ -20,6 +46,26 @@ export interface State {
   excuses: string[];
   modules: { imessage: ModuleHealth; detector: ModuleHealth; calls: ModuleHealth; webcam: ModuleHealth };
   stats: { focused_secs: number; distracted_secs: number; calls_made: number; texts_sent: number };
+  settings: Settings;
+  monitor: {
+    screen: {
+      enabled: boolean;
+      active: boolean;
+      every_secs: number;
+      last_check_at: string | null;
+      next_check_at: string | null;
+      method: "rule" | "ai" | "screenshot" | "forced" | null;
+      latency_ms: number | null;
+    };
+    webcam: {
+      enabled: boolean;
+      active: boolean;
+      last_check_at: string | null;
+      verdict: null | { focus: Focus; distraction: string | null; reason: string };
+      latency_ms: number | null;
+      photo_at: string | null;
+    };
+  };
 }
 
 export type EventKind =
@@ -88,6 +134,10 @@ export interface ApiClient {
   getState(): Promise<State>;
   getEvents(after: number): Promise<{ events: Event[] }>;
   getTasks(): Promise<TaskResponse>;
+  getSettings(): Promise<SettingsResponse>;
+  updateSettings(patch: SettingsPatch): Promise<SettingsResponse & { ok: true }>;
+  getLogs(after: number): Promise<LogsResponse>;
+  getWebcamPhoto(timestamp: number, signal?: AbortSignal): Promise<Blob | null>;
   startSession(input: SessionInput): Promise<CommandResult>;
   stopSession(): Promise<CommandResult>;
   notDistracted(): Promise<CommandResult>;

@@ -1,4 +1,4 @@
-import type { ApiClient, CallEndedData, CallType, Event, EventKind, SessionInput, State, Task, TranscriptLine } from "./types";
+import type { ApiClient, CallEndedData, CallType, Event, EventKind, LogLine, SessionInput, Settings, SettingsPatch, SettingsResponse, State, Task, TranscriptLine } from "./types";
 
 const PROMISE = "open your laptop and find the file";
 const EXCUSE = "I don't know how to start";
@@ -52,11 +52,30 @@ function parseSession(input: SessionInput, now: number): { goal: string; until: 
   return { goal, until: until.toISOString() };
 }
 
-export function createMockApi(now: () => number = Date.now): ApiClient {
+export interface MockOptions {
+  available?: Partial<SettingsResponse["available"]>;
+  unavailable_reason?: SettingsResponse["unavailable_reason"];
+}
+
+export function createMockApi(now: () => number = Date.now, options: MockOptions = {}): ApiClient {
   let time = now();
   let nextId = 1;
+  let nextLogId = 1;
   let actions: Action[] = [];
   let events: Event[] = [];
+  let logs: LogLine[] = [];
+  let nextMonitorAt = Infinity;
+  let previewUntil = 0;
+  let forcedUntil = 0;
+  let screenChecks = 0;
+  let callbackStartedAt: number | null = null;
+  let activeCallWithCallback = false;
+  const available = { screen: options.available?.screen ?? true, webcam: options.available?.webcam ?? true };
+  const unavailableReason = {
+    ...(!available.screen ? { screen: options.unavailable_reason?.screen || "Screen monitoring is not available on this computer." } : {}),
+    ...(!available.webcam ? { webcam: options.unavailable_reason?.webcam || "A camera is not available on this computer." } : {}),
+  };
+  const settings: Settings = { screen_monitoring: available.screen, screenshots: true, webcam: available.webcam, detector_mode: "lockin", detector_llm: "gemini", demo_mode: true };
   const ignoredApps = new Set<string>();
   const due = (days: number, hour: number, minute = 0) => {
     const date = new Date(time);
@@ -91,16 +110,81 @@ export function createMockApi(now: () => number = Date.now): ApiClient {
       imessage: { status: "ok", message: "Simulated messages" },
       detector: { status: "ok", message: "Scripted screen activity" },
       calls: { status: "ok", message: "Simulated calls; no phone will ring" },
-      webcam: { status: "off", message: "Webcam is off in mock mode" },
+      webcam: { status: available.webcam ? "ok" : "off", message: available.webcam ? "Generated camera preview; no real camera is used" : unavailableReason.webcam },
     },
     stats: { focused_secs: 0, distracted_secs: 0, calls_made: 0, texts_sent: 0 },
+    settings,
+    monitor: {
+      screen: { enabled: available.screen, active: false, every_secs: 3, last_check_at: null, next_check_at: null, method: null, latency_ms: null },
+      webcam: { enabled: available.webcam, active: false, last_check_at: null, verdict: null, latency_ms: null, photo_at: null },
+    },
   };
 
   const iso = () => new Date(time).toISOString();
 
+  function log(source: string, message: string) {
+    logs.push({ id: nextLogId++, at: iso(), source, message });
+    logs = logs.slice(-300);
+  }
+
+  function monitoringEnabled() {
+    return (settings.screen_monitoring && available.screen) || (settings.webcam && available.webcam);
+  }
+
+  function canEscalate() {
+    return Boolean(state.session) && (monitoringEnabled() || forcedUntil > time);
+  }
+
+  function updateMonitorFlags() {
+    const screen = state.monitor.screen;
+    const webcam = state.monitor.webcam;
+    screen.enabled = settings.screen_monitoring && available.screen;
+    screen.active = screen.enabled && Boolean(state.session);
+    webcam.enabled = settings.webcam && available.webcam;
+    webcam.active = webcam.enabled && Boolean(state.session);
+    state.modules.detector = { status: screen.enabled ? "ok" : "off", message: !available.screen ? unavailableReason.screen : screen.enabled ? "Simulated screen monitoring" : "Screen monitoring is paused" };
+    state.modules.webcam = { status: webcam.enabled ? "ok" : "off", message: !available.webcam ? unavailableReason.webcam : webcam.enabled ? "Generated camera preview; no real camera is used" : "Camera is off" };
+    if (!webcam.active) { webcam.verdict = null; webcam.latency_ms = null; }
+    if (!webcam.enabled) { webcam.photo_at = null; webcam.last_check_at = null; }
+    const needsTick = screen.active || webcam.active || (webcam.enabled && previewUntil > time);
+    if (!needsTick) nextMonitorAt = Infinity;
+    else if (!Number.isFinite(nextMonitorAt)) nextMonitorAt = time;
+    screen.next_check_at = screen.active ? new Date(nextMonitorAt).toISOString() : null;
+  }
+
+  function checkMonitor() {
+    updateMonitorFlags();
+    const screen = state.monitor.screen;
+    const webcam = state.monitor.webcam;
+    if (screen.active) {
+      const methods = settings.screenshots ? ["rule", "ai", "screenshot"] as const : ["rule", "ai"] as const;
+      screen.method = forcedUntil > time ? "forced" : methods[screenChecks++ % methods.length];
+      screen.last_check_at = iso();
+      screen.latency_ms = screen.method === "rule" ? 12 : screen.method === "forced" ? 0 : settings.detector_llm === "gemini" ? 348 : 216;
+      log("detect", `${screen.method} · ${state.verdict?.focus || "unsure"} · ${settings.detector_mode} mode`);
+      if (screen.method === "ai" || screen.method === "screenshot") log("brain", `${settings.detector_llm}: ${screen.method === "screenshot" ? "Screenshot checked and discarded." : "Window title checked."}`);
+    }
+    if (webcam.enabled && (webcam.active || previewUntil > time)) {
+      webcam.photo_at = iso();
+      if (webcam.active) {
+        webcam.last_check_at = iso();
+        webcam.latency_ms = 265;
+        const distracted = state.verdict?.focus === "distracted";
+        webcam.verdict = { focus: distracted ? "distracted" : "on_task", distraction: distracted ? "Phone in hand" : null, reason: distracted ? "The simulated student is looking at a phone." : "The simulated student is looking at the assignment." };
+        log("webcam", distracted ? "Phone in hand detected in the simulated frame." : "Focused · simulated frame checked in memory.");
+      } else log("webcam", "Preview refreshed in memory. No judgment outside a session.");
+    }
+    const needsTick = screen.active || webcam.active || (webcam.enabled && previewUntil > time);
+    nextMonitorAt = needsTick ? time + 3000 : Infinity;
+    screen.next_check_at = screen.active ? new Date(nextMonitorAt).toISOString() : null;
+  }
+
   function emit(kind: EventKind, summary: string, data: Record<string, unknown> = {}) {
     events.push({ id: nextId++, at: iso(), kind, summary, data: copy(data) });
     events = events.slice(-200);
+    const source = kind.startsWith("text") ? "text" : kind.startsWith("call") ? "call" : kind === "verdict" ? "detect" : kind === "error" ? "api" : "main";
+    const message = kind === "text_out" ? `→ ${summary}` : kind === "text_in" ? `← ${summary}` : kind === "call_started" ? `📞 ${String(data.call_type)} call starting` : kind === "verdict" && data.focus === "distracted" ? `distracted: ${String(data.distraction)}` : summary;
+    log(source, message);
   }
 
   function sendText(text: string) {
@@ -119,11 +203,12 @@ export function createMockApi(now: () => number = Date.now): ApiClient {
 
   function setFocused(reason: string, preserveApp = false) {
     const changed = state.verdict?.focus !== "on_task";
-    if (!preserveApp) state.activity = { app: "Visual Studio Code", title: "assignment.py — CSE homework", url: null };
-    state.verdict = { focus: "on_task", distraction: null, reason };
+    if (!settings.screen_monitoring || !available.screen) state.activity = null;
+    else if (!preserveApp) state.activity = { app: "Visual Studio Code", title: "assignment.py — CSE homework", url: null };
+    state.verdict = monitoringEnabled() ? { focus: "on_task", distraction: null, reason } : null;
     state.distracted_since = null;
     if (!state.call_in_progress && !state.callback_at) state.stage = state.session ? "watching" : "idle";
-    if (changed) emit("verdict", "Back on task. Mom approves.", { ...state.verdict, ...state.activity });
+    if (changed && state.verdict) emit("verdict", "Back on task. Mom approves.", { ...state.verdict, ...state.activity });
   }
 
   function endSession(reason: "stopped" | "time_up") {
@@ -136,10 +221,14 @@ export function createMockApi(now: () => number = Date.now): ApiClient {
     state.distracted_since = null;
     state.activity = null;
     state.verdict = null;
+    forcedUntil = 0;
+    callbackStartedAt = null;
+    updateMonitorFlags();
   }
 
   function finishCall(callType: CallType, withCallback: boolean) {
     state.call_in_progress = null;
+    forcedUntil = 0;
     const data: CallEndedData = {
       call_type: callType,
       conversation_id: `mock-conversation-${nextId}`,
@@ -161,9 +250,10 @@ export function createMockApi(now: () => number = Date.now): ApiClient {
     if (callType === "callback") {
       sendText("Good. Mom is proud. Now keep going.");
       endSession("stopped");
-    } else if (withCallback && state.session) {
-      sendText("You promised Mom: open your laptop and find the file. I'm calling back in 1 min. Don't make me call your cousin.");
+    } else if (withCallback && canEscalate()) {
+      sendText(`You promised Mom: open your laptop and find the file. I'm calling back in ${settings.demo_mode ? "1 min" : "5 min"}. Don't make me call your cousin.`);
       state.stage = "waiting_callback";
+      callbackStartedAt = time;
       state.callback_at = new Date(time + state.ladder.callback_after_secs * 1000).toISOString();
       schedule("callback", state.ladder.callback_after_secs, () => startCall("callback", false));
     } else {
@@ -177,23 +267,47 @@ export function createMockApi(now: () => number = Date.now): ApiClient {
     state.stage = "calling";
     state.callback_at = null;
     state.call_in_progress = { call_type: callType, started_at: iso() };
+    activeCallWithCallback = withCallback;
     state.stats.calls_made += 1;
     emit("call_started", callType === "callback" ? "Mom is calling back to check your promise." : "Mom is calling. Time for a little talk.", {
       call_type: callType,
       opening_line: callType === "callback" ? "Jay, did you open your laptop and find the file?" : NUDGE_TRANSCRIPT[0].message,
     });
-    schedule("call_end", callType === "callback" ? 10 : 15, () => finishCall(callType, withCallback));
+    schedule("call_end", callType === "callback" ? 10 : settings.demo_mode ? 15 : 48, () => finishCall(callType, withCallback));
+  }
+
+  function planEscalation() {
+    cancel("text", "nudge");
+    if (!canEscalate() || !state.distracted_since || state.call_in_progress) return;
+    const elapsed = (time - Date.parse(state.distracted_since)) / 1000;
+    if (state.stage !== "texted") schedule("text", Math.max(0, state.ladder.text_after_secs - elapsed), () => {
+      if (!canEscalate() || state.verdict?.focus !== "distracted") return;
+      state.stage = "texted";
+      sendText("?");
+    });
+    schedule("nudge", Math.max(0, state.ladder.call_after_secs - elapsed), () => {
+      if (canEscalate() && state.verdict?.focus === "distracted") startCall("nudge", true);
+    });
   }
 
   function distract(distraction: string) {
     cancel("distraction", "text", "nudge", "focus");
-    state.activity = { app: distraction, title: `${distraction} — For You`, url: null };
-    state.verdict = { focus: "distracted", distraction, reason: `This looks like ${distraction}, rather than your current task.` };
+    state.activity = settings.screen_monitoring && available.screen ? { app: distraction, title: `${distraction} — For You`, url: null } : null;
+    state.verdict = { focus: "distracted", distraction, reason: forcedUntil > time ? `Demo override: ${distraction}.` : state.activity ? `This looks like ${distraction}, rather than your current task.` : "The simulated camera noticed a phone in your hand." };
     state.distracted_since = iso();
     state.stage = "distracted";
     emit("verdict", `Distracted: ${distraction}. Mom noticed.`, { ...state.verdict, ...state.activity });
-    schedule("text", state.ladder.text_after_secs, () => { state.stage = "texted"; sendText("?"); });
-    schedule("nudge", state.ladder.call_after_secs, () => startCall("nudge", true));
+    planEscalation();
+  }
+
+  function planDistraction() {
+    cancel("distraction");
+    if (!state.session || !monitoringEnabled() || state.call_in_progress || state.callback_at || forcedUntil > time) return;
+    schedule("distraction", settings.demo_mode ? 5 : 15, () => {
+      if (!monitoringEnabled() || !state.session) return;
+      const distraction = settings.screen_monitoring && available.screen ? "TikTok" : "Phone in hand";
+      if (!ignoredApps.has(distraction)) distract(distraction);
+    });
   }
 
   function tickTo(target: number) {
@@ -205,18 +319,101 @@ export function createMockApi(now: () => number = Date.now): ApiClient {
 
   function advance() {
     const target = Math.max(time, now());
-    while (actions[0] && actions[0].at <= target) {
-      const next = actions.shift()!;
-      tickTo(next.at);
-      next.run();
+    while (Math.min(actions[0]?.at ?? Infinity, nextMonitorAt) <= target) {
+      if ((actions[0]?.at ?? Infinity) <= nextMonitorAt) {
+        const next = actions.shift()!;
+        tickTo(next.at);
+        next.run();
+      } else {
+        tickTo(nextMonitorAt);
+        checkMonitor();
+      }
     }
     tickTo(target);
     state.now = iso();
   }
 
+  function settingsResponse(): SettingsResponse {
+    return copy({ settings, available, unavailable_reason: unavailableReason });
+  }
+
+  function validateSettings(patch: SettingsPatch) {
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new Error("Settings must be an object.");
+    for (const [key, value] of Object.entries(patch)) {
+      if (!Object.prototype.hasOwnProperty.call(settings, key)) throw new Error(`Unknown setting: ${key}.`);
+      if (key === "detector_mode") {
+        if (value !== "lockin" && value !== "relaxed") throw new Error("Detector mode must be lockin or relaxed.");
+      } else if (key === "detector_llm") {
+        if (value !== "gemini" && value !== "jev") throw new Error("AI model must be gemini or jev.");
+      } else if (typeof value !== "boolean") throw new Error(`${key} must be a boolean.`);
+    }
+    if (patch.screen_monitoring && !available.screen) throw new Error(unavailableReason.screen);
+    if (patch.webcam && !available.webcam) throw new Error(unavailableReason.webcam);
+  }
+
+  function updateTiming() {
+    state.demo_mode = settings.demo_mode;
+    state.ladder = settings.demo_mode ? { text_after_secs: 10, call_after_secs: 25, callback_after_secs: 45 } : { text_after_secs: 120, call_after_secs: 300, callback_after_secs: 300 };
+    if (state.call_in_progress) {
+      const call = state.call_in_progress;
+      const elapsed = (time - Date.parse(call.started_at)) / 1000;
+      const length = call.call_type === "callback" ? 10 : settings.demo_mode ? 15 : 48;
+      cancel("call_end");
+      schedule("call_end", Math.max(0, length - elapsed), () => finishCall(call.call_type, activeCallWithCallback));
+    } else if (state.callback_at && callbackStartedAt !== null) {
+      cancel("callback");
+      state.callback_at = new Date(Math.max(time, callbackStartedAt + state.ladder.callback_after_secs * 1000)).toISOString();
+      schedule("callback", (Date.parse(state.callback_at) - time) / 1000, () => { if (canEscalate()) startCall("callback", false); });
+    } else if (state.distracted_since) planEscalation();
+    else planDistraction();
+  }
+
+  updateMonitorFlags();
+  log("main", "Mom.exe mock started. No real messages, calls, camera, or screenshots.");
+
   return {
     async getState() { advance(); return copy(state); },
     async getEvents(after) { advance(); return { events: copy(events.filter((event) => event.id > after)) }; },
+    async getSettings() { advance(); return settingsResponse(); },
+    async updateSettings(patch) {
+      advance();
+      validateSettings(patch);
+      const sourceChanged = (patch.screen_monitoring !== undefined && patch.screen_monitoring !== settings.screen_monitoring) || (patch.webcam !== undefined && patch.webcam !== settings.webcam);
+      const timingChanged = patch.demo_mode !== undefined && patch.demo_mode !== settings.demo_mode;
+      Object.assign(settings, patch);
+      log("api", `Settings updated: ${Object.entries(patch).map(([key, value]) => `${key}=${String(value)}`).join(", ") || "no changes"}.`);
+      updateMonitorFlags();
+      if (sourceChanged && forcedUntil <= time) {
+        cancel("distraction", "text", "nudge", "focus");
+        if (!monitoringEnabled()) { cancel("callback"); state.callback_at = null; callbackStartedAt = null; }
+        if (state.session) {
+          setFocused(monitoringEnabled() ? "Monitoring settings changed. Mom is checking your next small step." : "Screen and camera monitoring are paused.");
+          planDistraction();
+        }
+      }
+      if (!settings.screen_monitoring || !available.screen) state.activity = null;
+      if (timingChanged) updateTiming();
+      checkMonitor();
+      return { ok: true as const, ...settingsResponse() };
+    },
+    async getLogs(after) {
+      advance();
+      return { lines: copy(logs.filter((line) => line.id > after)) };
+    },
+    async getWebcamPhoto(_timestamp, signal) {
+      if (signal?.aborted) throw new DOMException("Camera request was cancelled.", "AbortError");
+      advance();
+      if (!settings.webcam || !available.webcam) return null;
+      previewUntil = time + 10_000;
+      updateMonitorFlags();
+      if (!state.monitor.webcam.photo_at) checkMonitor();
+      const caption = state.session ? state.monitor.webcam.verdict?.focus === "distracted" ? "PHONE IN HAND" : "FOCUS IN PROGRESS" : "PREVIEW ONLY — NOT JUDGING";
+      const phone = state.session && state.monitor.webcam.verdict?.focus === "distracted"
+        ? '<g transform="rotate(-12 510 270)"><path d="M475 310l35-28" stroke="#7d9775" stroke-width="22" stroke-linecap="round"/><rect x="489" y="213" width="58" height="98" rx="8" fill="#182a29" stroke="#d9ba74" stroke-width="5"/><rect x="497" y="225" width="42" height="68" rx="3" fill="#7e9ca1"/><circle cx="518" cy="302" r="3" fill="#e5d7a3"/><path d="M490 270v26" stroke="#8aa17c" stroke-width="12" stroke-linecap="round"/></g>' : '';
+      const stamp = new Date(state.monitor.webcam.photo_at || time).toISOString().slice(11, 19);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500"><defs><pattern id="scan" width="4" height="4" patternUnits="userSpaceOnUse"><path d="M0 0h4" stroke="#b8d7a0" stroke-opacity=".06"/></pattern></defs><rect width="800" height="500" fill="#152720"/><path d="M0 360h800v140H0z" fill="#283e31"/><rect x="60" y="66" width="175" height="180" rx="2" fill="#294435"/><path d="M145 66v180M60 153h175" stroke="#4a6650" stroke-width="7"/><circle cx="420" cy="188" r="59" fill="#7d9775"/><path d="M319 345v-42q0-76 101-76t101 76v42" fill="#54765c"/><path d="M250 309h296l-24 102H278z" fill="#8ca58a"/><path d="M235 411h325" stroke="#bed1a6" stroke-width="12"/>${phone}<path d="M624 344v-73m0 35q-62-44-28-66 35 2 28 66m0 13q69-53 72-16-20 32-72 16" fill="#55774c" stroke="#55774c" stroke-width="8"/><path d="M600 344h56l-10 55h-36z" fill="#a48d64"/><rect width="800" height="500" fill="url(#scan)"/><g fill="#c2d9ae" font-family="monospace"><text x="30" y="40" font-size="20">MOM CAM / GENERATED DEMO</text><text x="650" y="40" font-size="20">${stamp}</text><text x="30" y="466" font-size="20">${caption}</text><text x="30" y="435" font-size="16">NO REAL PHOTO · MEMORY ONLY</text></g><path d="M22 75v-20h20M758 55h20v20M22 425v20h20M758 445h20v-20" fill="none" stroke="#94b17e" stroke-width="3"/></svg>`;
+      return new Blob([svg], { type: "image/svg+xml" });
+    },
     async getTasks() {
       advance();
       return {
@@ -243,7 +440,8 @@ export function createMockApi(now: () => number = Date.now): ApiClient {
       const deadline = parsed.until ? ` until ${new Date(parsed.until).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}` : "";
       sendText(`OK Jay. ${parsed.goal}${deadline}. Mom is watching. 👀`);
       setFocused("Your editor is open. A good place to start.");
-      schedule("distraction", 5, () => { if (!ignoredApps.has("TikTok")) distract("TikTok"); });
+      planDistraction();
+      checkMonitor();
       if (parsed.until) schedule("deadline", (Date.parse(parsed.until) - time) / 1000, () => endSession("time_up"));
       return { ok: true, ...parsed };
     },
@@ -252,6 +450,8 @@ export function createMockApi(now: () => number = Date.now): ApiClient {
       advance();
       if (!state.session) throw new Error("Start a session before telling Mom you're working.");
       if (state.activity) ignoredApps.add(state.activity.app);
+      if (state.verdict?.distraction) ignoredApps.add(state.verdict.distraction);
+      forcedUntil = 0;
       cancel("text", "nudge", "focus");
       setFocused("You told Mom this app is part of your work. She will remember for this session.", true);
       emit("text_in", "I'm actually working.", { text: "I'm actually working." });
@@ -273,9 +473,12 @@ export function createMockApi(now: () => number = Date.now): ApiClient {
       if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 3600) throw new Error("Choose a duration between 1 and 3,600 seconds.");
       cancel("callback");
       state.callback_at = null;
+      forcedUntil = time + seconds * 1000;
       distract(distraction.trim());
+      checkMonitor();
       schedule("focus", seconds, () => {
         cancel("text", "nudge");
+        forcedUntil = 0;
         setFocused("The forced distraction has ended. Back to your task.");
       });
       return { ok: true };

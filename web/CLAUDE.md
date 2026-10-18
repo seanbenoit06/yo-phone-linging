@@ -7,3 +7,5 @@ Jay selected **The Family Computer** as the default functional dashboard. Preser
 Work only in `web/`. Other sessions own the Python app and backend files. Keep code, comments, and documentation in English; explain progress to Jay in Traditional Chinese. Do not store credentials or phone numbers here, do not use `git add -A`, and ask before pushing.
 
 Use `/?mock=1` for independent development. There is no browser answer-call or hangup endpoint. Read the handoff's verification record before claiming backend services or Windows execution have been tested.
+
+For monitoring and editable controls, `../docs/UI_SPEC.md` section 9 is the governing v2 contract. Family Computer includes Mom's Eyes, Mom's Log, and acknowledged settings writes. Keep camera frames only in memory, stop photo polling when Eyes is hidden, and never save real camera photos or screenshots containing them in this repository. Only mock SVG camera scenes belong in UI evidence.

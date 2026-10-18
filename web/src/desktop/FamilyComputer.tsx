@@ -1,7 +1,8 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
-import { Activity, ArrowUpRight, FolderOpen, Heart, Home, MessageCircle, Monitor, Phone, RotateCcw, Settings2, Wifi, WifiOff } from 'lucide-react';
+import { Activity, ArrowUpRight, Eye, FolderOpen, Heart, Home, MessageCircle, Monitor, Phone, RotateCcw, Settings2, Terminal, Wifi, WifiOff } from 'lucide-react';
 import { useDashboard, useTasks } from '../api/client';
 import { useApiSource, useServerClock } from '../api/ui';
+import { useSettings } from '../api/settings';
 import type { Event, State, Task } from '../api/types';
 import { ExcusesCard, Ladder, MoodMeter, RightNow, StatsCard, timeLabel } from '../components/dashboard';
 import { Timeline } from '../components/Timeline';
@@ -14,12 +15,17 @@ import { StudyControl } from './StudyControl';
 import { IncomingCall } from './IncomingCall';
 import { initialWindows, windowReducer, type WindowId } from './windowState';
 import { recentMessages } from './selectors';
+import { MomEyes } from './MomEyes';
+import { MomLog } from './MomLog';
+import { ControlSettings } from './ControlSettings';
 import './desktop.css';
 
 const applications = [
   { id: 'today' as const, title: 'Study Control', label: 'Today', icon: Home },
   { id: 'tasks' as const, title: 'My Homework', label: 'Tasks', icon: FolderOpen },
   { id: 'calls' as const, title: 'Call History', label: 'Calls', icon: Phone },
+  { id: 'eyes' as const, title: "Mom's Eyes", label: 'Eyes', icon: Eye },
+  { id: 'logs' as const, title: "Mom's Log", label: 'Log', icon: Terminal },
   { id: 'settings' as const, title: 'Control Panel', label: 'Settings', icon: Settings2 },
 ];
 
@@ -53,6 +59,7 @@ function HomeworkPreview({ tasks, onOpen }: { tasks: Task[]; onOpen: () => void 
 export function FamilyComputer() {
   const [mock, changeMock] = useApiSource();
   const { state, events, connection, loading, api, refresh } = useDashboard(mock);
+  const controls = useSettings(api, state, refresh);
   const taskData = useTasks(mock);
   const now = useServerClock(state);
   const [windows, dispatch] = useReducer(windowReducer, initialWindows);
@@ -116,7 +123,9 @@ export function FamilyComputer() {
             {id === 'today' ? state ? <div className="fc-study-slot"><StudyControl key={mock ? 'mock' : 'real'} state={state} api={api} refresh={refresh} now={now} tasks={taskData.tasks} disabled={connection !== 'connected'} />{state.session && <Ladder state={state} now={now} events={events} />}<RightNow state={state} /></div> : <div className="fc-loading" aria-busy={loading} aria-label="Loading Study Control"><div className="skeleton skeleton-hero" /><p>{loading ? 'Mom is getting everything ready…' : 'Waiting for the local API. You can use the mock demo to explore.'}</p><button className="button" onClick={() => open('settings')}>Open Control Panel</button></div> :
               id === 'tasks' ? <div className="fc-secondary-content"><Tasks key={mock ? 'mock' : 'real'} tasks={taskData.tasks} sources={taskData.sources} loading={taskData.loading} error={taskData.error} api={api} refresh={refresh} onStarted={() => open('today')} now={now} /></div> :
               id === 'calls' ? <div className="fc-secondary-content"><Calls events={events} /></div> :
-              <div className="fc-secondary-content"><Settings state={state} mock={mock} onMockChange={changeMock} api={api} refresh={refresh} appearance={appearance} /></div>}
+              id === 'eyes' ? <MomEyes key={mock ? 'mock' : 'real'} state={state} settings={controls.data} settingsError={controls.errorKey ? null : controls.error} api={api} active={windows.active === 'eyes'} now={now} mock={mock} /> :
+              id === 'logs' ? <MomLog key={mock ? 'mock' : 'real'} api={api} active={windows.active === 'logs'} mock={mock} /> :
+              <div className="fc-secondary-content"><Settings state={state} mock={mock} onMockChange={changeMock} api={api} refresh={refresh} appearance={appearance} controls={<ControlSettings state={state} controller={controls} />} /></div>}
           </DesktopWindow>)}
           {windows.active === 'today' && <>
             <DesktopWindow title="My Homework · Up next" icon={<FolderOpen size={20} />} footer={<span>{taskData.error ? 'Source update unavailable. Open Tasks for details.' : 'Assignments and deadlines from your connected sources.'}</span>}><HomeworkPreview tasks={taskData.tasks} onOpen={() => open('tasks')} /></DesktopWindow>

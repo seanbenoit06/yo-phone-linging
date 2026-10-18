@@ -1,6 +1,6 @@
 # Mom.exe — Family Computer edition
 
-The selected Mom.exe interface is **Family Computer**, a retro desktop with teal wallpaper, beveled windows, a taskbar, and a Mom call-status window. It is the default dashboard at `/`. It uses the existing real/mock API contract and provides the full Today, Tasks, Calls, and Settings flows.
+The selected Mom.exe interface is **Family Computer**, a retro desktop with teal wallpaper, beveled windows, a taskbar, and a Mom call-status window. It is the default dashboard at `/`. It uses the existing real/mock API contract and provides Today, Tasks, Calls, Mom’s Eyes, Mom’s Log, and editable Settings.
 
 The original Flow, Mom, and Portal dashboard remains at `/?edition=classic`. The Style room remains available for comparing the original design studies. [CLAUDE.md](./CLAUDE.md) is the frontend continuation entry point; [CLAUDE_HANDOFF.md](./CLAUDE_HANDOFF.md) provides the implementation map, verification evidence, and a ready-to-paste continuation prompt.
 
@@ -47,7 +47,10 @@ The selected Family Computer layout supersedes the original spec's Flow default 
 - Open Today/Study Control to tell Mom a goal, monitor the current app and escalation stage, inspect activity, or end a session with inline confirmation.
 - Open Tasks/My Homework to see assignments and source health. **Start with Mom** offers **30 min**, **1 hour**, **2 hours**, and **Until due**, then returns to Today.
 - Open Calls for completed conversations, answers or missed calls, duration, promises, excuses, and transcripts.
-- Open Settings for the API source, read-only thresholds, confirmed Test call, and collapsed Demo controls.
+- Open Eyes (eye icon) for **Mom's Eyes**: screen activity, verdict, detection method and timing, plus a memory-only camera preview. Camera images refresh every three seconds only while Eyes is visible. Outside a session the camera previews without judging.
+- Open Log (terminal icon) for **Mom's Log**: live colored entries, a source filter, Pause/Resume scrolling, and Clear view. Pausing scrolling does not stop receiving entries. Clear view does not erase backend logs.
+- Open Settings for immediate monitoring controls: Screen monitoring, Screenshot second look, Camera, Lock-in mode, Demo timing, and AI model. Each change shows Saving, Saved, or a readable error. Unsupported controls explain why; screenshots are disabled while screen monitoring is off. Your name remains read-only.
+- Settings also retains the API source, confirmed Test call, and collapsed Demo controls.
 - Use window controls to minimize or enlarge a window, and the taskbar or navigation to restore it. Minimizing a window does not stop the session or polling.
 - Mom Messenger reflects actual events. The taskbar and health indicators reflect the active API source.
 
@@ -55,10 +58,22 @@ The call window is a status display. **Answer the actual call on your phone.** T
 
 Use a desktop browser at 1280–1920 pixels wide for the demo; the interface must remain usable at 1024 pixels. Fonts load from Google Fonts, with local fallbacks when offline.
 
+## Monitoring behavior
+
+Family Computer implements section 9 of `docs/UI_SPEC.md`. The classic dashboard keeps its original read-only settings block and theme picker; the Style room remains an independent design prototype.
+
+- **Settings:** saves send one changed field and wait for the API acknowledgement. A background `GET /api/settings` runs every 10 seconds to refresh saved values, capabilities, and unavailable reasons. Initial-load failures retry every five seconds. Writes serialize, older responses cannot undo newer saves, and background reads do not disable the controls. Real settings are saved by the Python app; mock settings remain in memory.
+- **Eyes:** camera photos refresh every three seconds only when the Eyes window and browser document are visible and the camera is available and enabled. Leaving the window, changing API source, or switching the camera off aborts requests and releases image object URLs. No photo files are written. The backend may keep its idle preview alive for up to 10 seconds after the last request, as defined by its preview lease.
+- **Photo age:** the image overlay reports when the displayed image was downloaded. A separate readout reports the latest server photo timestamp. These remain distinct so a failed download cannot make an older displayed image look newly captured.
+- **Screen status:** only the URL host is shown. A screenshot second look displays the specified deletion message, never the screenshot itself. The subtle scan animation is inferred from the scheduled check time; the API has no separate in-flight-check flag.
+- **Log:** after the window is first opened, logs poll every second and retain the newest 1,000 lines. Minimize does not stop that polling. Pause/Resume affects scrolling only. Clear view clears the local buffer while retaining the cursor; backend history is unchanged.
+
+The camera can preview while idle. Camera judgment and screen monitoring require a session. Unavailable features, module errors, missing photos, and disabled monitoring have explicit states.
+
 ## Run the scripted mock demo
 
 1. Open `/?mock=1` and start a session with a future deadline, for example a task with a **30 min** duration.
-2. Let the sequence run without interrupting it. The default sequence takes about **100 seconds**:
+2. Keep **Screen monitoring** and **Demo timing** enabled, then let the sequence run without interrupting it. The default sequence takes about **100 seconds**:
 
    | Time since session start | Event |
    | --- | --- |
@@ -77,7 +92,7 @@ Use a desktop browser at 1280–1920 pixels wide for the demo; the interface mus
 
 The provided nudge transcript retains its recorded **48-second** duration and timestamps. Its simulated on-screen call lasts about **15 seconds**. The transcript and follow-up text retain their original five-minute/one-minute wording; the countdown uses the configured 45-second demo delay.
 
-Mock sessions, events, statistics, and tasks live in memory and reset on a full reload. API-source and classic-theme preferences persist in local storage. Sample deadlines are relative to mock initialization.
+Mock sessions, events, statistics, monitoring settings, logs, and tasks live in memory and reset on a full reload. API-source and classic-theme preferences persist in local storage. Sample deadlines are relative to mock initialization.
 
 ## Tasks
 
@@ -98,6 +113,10 @@ Run `npm run dev`, then open `/?mock=0` or turn off Use mock API in Settings. Vi
 | `GET /api/state` | Session, activity, stages, health, promise, and stats; every second. |
 | `GET /api/events?after={id}` | Incremental activity and call history; every second. |
 | `GET /api/tasks` | Tasks and source status; every 60 seconds. |
+| `GET /api/settings` | Current controls, platform capabilities, and unavailable reasons; initial load and every 10 seconds. Initial failures retry every five seconds. |
+| `POST /api/settings` | One changed setting as a partial settings object; acknowledgement supplies the saved values. |
+| `GET /api/webcam/photo?t={timestamp}` | Memory-only camera image, every three seconds while Eyes is visible and the camera is enabled; 404 means waiting for a photo. |
+| `GET /api/logs?after={id}` | Incremental logs every second once the Log window has been opened; its view retains the newest 1,000 lines. |
 | `POST /api/session/start` | `{ text }` from free text or `{ goal, until }` from a task. |
 | `POST /api/session/stop` | `{}` after inline confirmation. |
 | `POST /api/not-distracted` | `{}` to accept the current app for this session. |
@@ -117,7 +136,7 @@ npm test
 npm run build
 ```
 
-The test suite covers the API command contract, deterministic mock transitions, polling behavior, desktop window state, and Messenger event selection. The build checks TypeScript and creates `web/dist` with the dashboard and Style room entries.
+The test suite covers the API contract, deterministic mock transitions, monitoring settings, concurrent reads/writes, log cursors, photo cancellation and object-URL cleanup, monitoring states, desktop window state, and Messenger event selection. The build checks TypeScript and creates `web/dist` with the dashboard and Style room entries.
 
 To preview compiled output, stop your development server first, then run:
 
@@ -129,12 +148,14 @@ Open `/?mock=1` for a standalone preview. Use `npm run dev` for Python integrati
 
 ## Verification and remaining work
 
-The final Family Computer source passed **22/22 tests** with `npm test` and passed `npm run build`. Native-browser checks exercised the full approximately 100-second mock sequence, session validation/start/trust/confirmed stop, timed and Until due task starts, Messenger events, call transcripts, timeline search, window controls, keyboard menu access, and mock demo commands. The classic theme switcher and Style room also loaded successfully.
+The final v2 source passed **59/59 tests** with `npm test` and passed `npm run build`, on macOS using Node.js 26 and npm 11.12. The full approximately 100-second mock sequence was also repeated in the browser through nudge, callback, final text, and session completion; its final console had no warnings or errors. The [handoff](./CLAUDE_HANDOFF.md#verification-record) distinguishes current v2 evidence from historical pre-v2 checks.
 
-No horizontal overflow was observed at 1440 px, in the 1024 px Today/Tasks/Settings views, or in Today and Tasks at 1920 px. The final mock browser run had no console warnings or errors. See the [handoff verification record](./CLAUDE_HANDOFF.md#verification-record) for precise coverage and screenshots.
+Current mock browser checks covered all six settings, both ladder timings (10/25/45 seconds and 120/300/300 seconds), idle camera preview, disabled screen/camera states, and active TikTok/phone-in-hand verdicts with method and timing. Minimizing Eyes removed its image; restoring it resumed the preview. Log filtering, pause/resume, and clear-view followed by new entries worked. Eyes, Log, and Control Panel were checked at 1024, 1440, and 1920 px; the 1024 px Eyes panes stack, all six taskbar entries fit, and no horizontal overflow was observed at 1024 or 1920 px. All three classic themes and the Style room were checked again.
 
-Switching from mock to the unavailable real API showed an offline banner without retaining mock data; Use mock demo recovered the interface. Recovery from a previously connected real backend is covered by poller tests, not a live browser integration run. API request failures during the earlier offline check were expected and are separate from the clean final mock run.
+The user’s running real API was also checked while its session stayed idle. State, settings, logs, and a 640x360 JPEG camera preview loaded. All six setting changes were acknowledged through the UI, then the exact original settings were restored and verified. Screen-off disabled Screenshot second look while idle camera preview continued; camera-off removed the image. No real session, call, text, or active escalation was triggered. No real photos were saved, and no backend files or processes were changed.
 
-Actual Windows execution, real calls, iMessage delivery, live screen detection, and live Canvas access remain unverified. The API configured on port 8765 was unreachable during the integration check, and no backend files or processes were changed. The API integration follows the documented contract; mock success does not verify external services. Initial real event history is limited to what the API returns for `after=0` (the latest 200 events). The application retains subsequent events during the current page session.
+Screenshots contain mock data only: [Eyes](./screenshots/v2-eyes.png), [Log](./screenshots/v2-log.png), [Control Panel](./screenshots/v2-controls.png), and [Eyes at 1024 px](./screenshots/v2-eyes-1024.png).
 
-Trello and Google Calendar remain placeholders. The original call fixture and shortened mock timing differ intentionally, as explained above. There is no deployment configuration; this is a local desktop dashboard. No commit or push was made.
+Unavailable hardware, module errors, missing-photo 404s, request cancellation, and source isolation have automated coverage. Actual Windows execution, backend-restart persistence, real active screen/camera judgment, live escalation, iMessage delivery, phone calls, and live Canvas access remain unverified. Recovery from a previously connected real backend is covered by poller tests rather than a browser restart/recovery exercise.
+
+Trello and Google Calendar remain placeholders. The scan animation is schedule-derived, and the supplied call fixture intentionally keeps its original duration/wording despite shorter demo timing. Initial real event history remains limited to the API’s latest 200 events. There is no deployment configuration, and no commit or push was made.

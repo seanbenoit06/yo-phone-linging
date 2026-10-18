@@ -29,3 +29,14 @@ test('reset restores the usable default layout after all windows are hidden and 
   assert.deepEqual(windowReducer(state, { type: 'reset' }), initialWindows);
   assert.deepEqual(initialWindows, { open: ['today'], active: 'today', maximized: false, messenger: true });
 });
+
+test('monitoring windows restore independently and stay mounted when switching views', () => {
+  let state = windowReducer(initialWindows, { type: 'open', id: 'eyes' });
+  state = windowReducer(state, { type: 'open', id: 'logs' });
+  state = windowReducer(state, { type: 'minimize', id: 'logs' });
+  assert.equal(state.active, null);
+  assert.deepEqual(state.open, ['today', 'eyes', 'logs']);
+  state = windowReducer(state, { type: 'taskbar', id: 'eyes' });
+  assert.equal(state.active, 'eyes');
+  assert.deepEqual(state.open, ['today', 'eyes', 'logs']);
+});

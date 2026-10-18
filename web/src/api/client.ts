@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createMockApi } from "./mock";
 import { createDashboardPoller, createTasksPoller } from "./poller";
 import type { ConnectionState, TasksData } from "./poller";
-import type { ApiClient, CommandResult, Event, State, TaskResponse } from "./types";
+import type { ApiClient, CommandResult, Event, LogsResponse, SettingsResponse, State, TaskResponse } from "./types";
 
 export type { ConnectionState } from "./poller";
 
@@ -33,10 +33,41 @@ export function createRealApi(fetcher: typeof fetch = (...args) => fetch(...args
     }
   }
 
+  async function webcamPhoto(timestamp: number, signal?: AbortSignal): Promise<Blob | null> {
+    if (signal?.aborted) throw new DOMException("Camera request was cancelled.", "AbortError");
+    const controller = new AbortController();
+    let timedOut = false;
+    const cancel = () => controller.abort();
+    signal?.addEventListener("abort", cancel, { once: true });
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 8000);
+    try {
+      const response = await fetcher(`/api/webcam/photo?t=${encodeURIComponent(String(timestamp))}`, { method: "GET", cache: "no-store", headers: { Accept: "image/*" }, signal: controller.signal });
+      if (response.status === 404) return null;
+      if (!response.ok) {
+        const data: unknown = await response.json().catch(() => null);
+        const error = data && typeof data === "object" && "error" in data && typeof data.error === "string" ? data.error : null;
+        throw new Error(error || `Mom couldn't load the camera photo (${response.status}). Please try again.`);
+      }
+      return await response.blob();
+    } catch (error) {
+      if (signal?.aborted) throw new DOMException("Camera request was cancelled.", "AbortError");
+      if (timedOut) throw new Error("The camera took too long to reply. Please try again.");
+      if (error instanceof TypeError) throw new Error("Can't reach Mom's camera. Is python main.py running?");
+      throw error instanceof Error ? error : new Error("Mom couldn't load the camera photo. Please try again.");
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", cancel);
+    }
+  }
+
   return {
     getState: () => request<State>("/state"),
     getEvents: (after) => request<{ events: Event[] }>(`/events?after=${Math.max(0, Math.floor(after))}`),
     getTasks: () => request<TaskResponse>("/tasks"),
+    getSettings: () => request<SettingsResponse>("/settings"),
+    updateSettings: (patch) => request<SettingsResponse & { ok: true }>("/settings", patch),
+    getLogs: (after) => request<LogsResponse>(`/logs?after=${Number.isFinite(after) ? Math.max(0, Math.floor(after)) : 0}`),
+    getWebcamPhoto: webcamPhoto,
     startSession: (input) => request<CommandResult>("/session/start", typeof input === "string" ? { text: input } : input),
     stopSession: () => request<CommandResult>("/session/stop", {}),
     notDistracted: () => request<CommandResult>("/not-distracted", {}),

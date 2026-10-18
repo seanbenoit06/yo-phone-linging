@@ -4,12 +4,14 @@
 
 Jay selected **The Family Computer** from the Style room and asked for a fully prepared version before continuing in Claude Code. Preserve its teal desktop, beveled cream windows, blue title bars, taskbar, homework explorer, Mom Messenger, and distinctive call-status window. Keep the design readable on a projector: body text at least 16 px, large session and stage labels, and usable layouts from 1024 to 1920 px.
 
-The functional Family Computer edition is the default at `/?mock=1`. This user decision supersedes `docs/UI_SPEC.md` where it calls for the original Flow default and sidebar layout. The API contract and behavioral requirements in the spec still apply. The old dashboard and all comparison studies remain available.
+The functional Family Computer edition is the default at `/?mock=1`. This user decision supersedes `docs/UI_SPEC.md` where it calls for the original Flow default and sidebar layout. The API contract and behavioral requirements in the spec still apply, including section 9 for monitoring and editable controls. The old dashboard and all comparison studies remain available.
 
 - Selected functional edition: `http://localhost:3000/?mock=1`
 - Real API mode: `http://localhost:3000/?mock=0`
 - Classic dashboard: `http://localhost:3000/?edition=classic&mock=1`
 - Original concept: `http://localhost:3000/style-lab.html?concept=momOS`
+
+The Family Computer v2 edition adds Mom’s Eyes, Mom’s Log, and six editable monitoring settings. The classic dashboard intentionally retains its original read-only settings block and theme picker; the Style room is unchanged.
 
 The production edition is API-wired. The Style room is a separate sample-state prototype; its scene controls and simulated call answer are not production API capabilities. `web/CLAUDE.md` is the frontend continuation entry point and directs future work to this handoff and the README.
 
@@ -33,27 +35,34 @@ The production edition is API-wired. The Style room is a separate sample-state p
 | `src/ClassicDashboard.tsx` | Preserved original dashboard and three switchable themes. |
 | `src/desktop/FamilyComputer.tsx` | Functional desktop shell, one dashboard/tasks polling tree, window navigation, real data wiring, and edition links. |
 | `src/desktop/DesktopWindow.tsx` | Shared window chrome and minimize/maximize presentation. |
-| `src/desktop/windowState.ts` | Window-state reducer for Today, Tasks, Calls, Settings, taskbar restoration, and Messenger visibility. |
+| `src/desktop/windowState.ts` | Window-state reducer for Today, Tasks, Calls, Eyes, Log, Settings, taskbar restoration, and Messenger visibility. |
 | `src/desktop/selectors.ts` | Selects the newest Messenger text events and presents them chronologically. |
 | `src/desktop/StudyControl.tsx` | Functional session entry and controls with actual deadlines and command feedback. |
 | `src/desktop/IncomingCall.tsx` | Honest phone-call status presentation; no browser answering. |
+| `src/desktop/MomEyes.tsx`, `eyes.css` | Screen/camera panes, module states, live readouts, and retro monitor/TV presentation. |
+| `src/desktop/eyesModel.ts` | Pure monitoring-state precedence, host-only URL display, method labels, timing, and displayed-photo age. |
+| `src/desktop/photoFeed.ts` | Three-second photo requests, abort/generation handling, and image object-URL lifecycle. |
+| `src/desktop/MomLog.tsx`, `log.css` | Command Prompt log view, source filter, scrolling controls, and clear-view action. |
+| `src/desktop/ControlSettings.tsx`, `controls.css` | Six editable monitoring controls with inline saving/saved/error feedback and capability reasons. |
 | `src/desktop/desktop.css` | Desktop layout, retro styling, responsive behavior, and scoped shared-component overrides. |
 | `src/desktop/study.css` | Study Control and call-status presentation. |
 | `src/api/ui.ts` | Shared API-source preference and server-aligned UI clock. |
 | `src/api/types.ts` | Authoritative frontend TypeScript API interfaces. |
 | `src/api/client.ts` | Real API implementation and React polling hooks. |
 | `src/api/poller.ts` | Poll scheduling, event cursor, error retention, and source teardown behavior. |
+| `src/api/settings.ts` | Settings controller/hook, authoritative refresh, write serialization, acknowledgement guards, and source isolation. |
+| `src/api/logs.ts` | Incremental log cursor, bounded buffer, clear-view semantics, and one-second polling. |
 | `src/api/mock.ts` | In-memory API with injectable clock and scripted demo. |
 | `src/views/Tasks.tsx` | Task sources, grouping, links, and task-start flow. |
 | `src/components/TaskStartPicker.tsx` | Duration selection and `{ goal, until }` command. |
 | `src/views/Calls.tsx`, `src/components/CallTranscript.tsx` | Completed call history, promise/excuse, and transcript. |
-| `src/views/Settings.tsx` | API source, thresholds, confirmed Test call, Demo controls, and configurable appearance content. |
+| `src/views/Settings.tsx` | Shared API source, confirmed Test call, Demo controls, and optional appearance/controls slots; classic defaults remain intact. |
 | `src/components/Timeline.tsx` | Searchable event history and expandable call transcript. |
 | `src/components/dashboard.tsx` | Shared ladder, activity, promise, stats, mood, and excuses components. |
 | `src/themes/themes.ts`, `src/themes/tokens.css` | Original theme copy/tokens and centralized Chinese decorative accents. |
 | `src/lab/`, `style-lab.html` | Preserved Family Portal, Mom's Little Corner, and Family Computer design studies. |
 | `vite.config.ts` | Port 3000, development API proxy to port 8765, and dashboard/Style room build entries. |
-| `tests/` | API, mock, polling, and any new focused behavior tests. |
+| `tests/` | API, mock, poller, settings concurrency, monitoring-state, photo-lifecycle, log-buffer, and desktop behavior tests. |
 
 Use the actual files as the source of truth if another session changes a name or interface after this document is written.
 
@@ -65,7 +74,11 @@ Use the actual files as the source of truth if another session changes a name or
 4. The UI clock follows `State.now`. Deadlines, distraction duration, callback countdowns, and task labels derive from this clock.
 5. Commands use the existing `ApiClient`, show pending/error feedback, and refresh after success. A source switch must not allow an old command's result to affect the newly selected source.
 6. Desktop window controls are presentation state. Session progress comes only from the active API source.
-7. Settings can supply edition-specific appearance content without duplicating real command controls. The classic dashboard keeps its three-theme picker.
+7. Family Computer creates one `useSettings(api, state, refresh)` controller. `Settings` receives the `ControlSettings` component through its optional controls slot; classic retains its three-theme picker and read-only block.
+8. Authoritative `GET /api/settings` runs initially and every 10 seconds. Initial failures retry every five seconds. Background reads refresh capabilities and unavailable reasons without disabling loaded controls. Only one write runs at a time; reads skip pending saves and a newer write invalidates an older read. Acknowledged values are protected from stale state polls until state catches up or a newer authoritative settings read replaces them. This also converges when another client changes the same field again.
+9. `MomLog` starts one `useLogs(api)` poller when opened. It continues while its mounted window is hidden, uses the greatest received ID as cursor, deduplicates, and retains the newest 1,000 lines. Clear view discards the local view without replaying old history; pause only stops scrolling. Resetting the desktop layout can unmount the window and dispose its poller.
+10. Eyes receives an explicit active-window flag because hidden desktop windows remain mounted. Photo requests run every three seconds only with an active/visible window and available/enabled camera. Hide, source change, camera-off, and teardown abort requests and revoke object URLs. The backend idle-preview lease can last 10 seconds after the last photo request. No screenshot or camera-photo files are written by the frontend.
+11. The displayed image age uses its download time; the latest server `photo_at` is shown separately. A stale displayed image therefore does not inherit a newer server timestamp. The scanning animation is inferred from the check schedule; `monitor.screen.active` means an enabled session, not a separate in-flight request flag.
 
 ### Commands
 
@@ -77,8 +90,11 @@ Use the actual files as the source of truth if another session changes a name or
 | I'm actually working | `POST /api/not-distracted` with `{}`. |
 | Test call | `POST /api/test-call` with `{}`, after inline confirmation. |
 | Force distracted | `POST /api/demo/force-distracted` with `{ "distraction": "TikTok", "seconds": 60 }`. |
+| Change monitoring setting | `POST /api/settings` with one changed field; accepts the full acknowledged `SettingsResponse`. |
 
 **There is no answer-call or hangup endpoint.** A production call window reports the real `call_in_progress` state and directs the user to answer on their phone. Do not reuse the Style room's simulated answer callback to mutate real dashboard state. Do not add a fake answer button, guessed endpoint, microphone capture, or browser calling integration.
+
+`State` includes `settings` and `monitor`. Hardware availability and unavailable reasons come from `GET /api/settings`, not from `State`. The additional reads are `GET /api/webcam/photo?t={timestamp}` (binary image; 404 means no photo) and `GET /api/logs?after={id}` (oldest-first incremental entries). Photo fetches use no-store behavior and generated SVG imagery in mock mode; never commit real camera imagery.
 
 Display all six stages correctly: `idle`, `watching`, `distracted`, `texted`, `calling`, and `waiting_callback`. Callback calls use `call_type: "callback"`; snitch is shown only when supported by received events. Render the shared Ladder only with a non-null session.
 
@@ -105,58 +121,76 @@ To inspect the compiled app, stop your dev server and run `npm run preview`, the
 
 ## Mock-demo behavior
 
-The standard sequence is approximately 100 seconds: watching at 0 s, distraction at 5 s, text at 15 s, nudge at 30 s, nudge ends at 45 s, callback starts at 90 s, and session ends at 100 s. These timings are relative to session start; the text/call thresholds are relative to distraction, and the callback delay starts when the nudge ends.
+With Screen monitoring and Demo timing enabled, the standard sequence is approximately 100 seconds: watching at 0 s, distraction at 5 s, text at 15 s, nudge at 30 s, nudge ends at 45 s, callback starts at 90 s, and session ends at 100 s. These timings are relative to session start; the text/call thresholds are relative to distraction, and the callback delay starts when the nudge ends.
 
 The provided nudge transcript retains its recorded 48-second duration while the visual mock call lasts about 15 seconds. Transcript wording about five minutes and follow-up wording about one minute remain the supplied fixture; the actual demo countdown is 45 seconds. This is an intentional fixture/timing distinction.
+
+Mock settings, monitor checks, generated camera imagery, and log messages share the same in-memory API and scripted transitions. Switching Demo timing changes the ladder between 10/25/45 and 120/300/300 seconds. Mock settings reset on reload; restart persistence is a backend responsibility.
 
 Mock tasks and synchronization status are samples. Their URLs are empty so Open is disabled. “This week” means the next seven calendar days. Missing/past deadlines disable Until due. Trello and Google Calendar stay as disabled coming-soon integrations.
 
 ## Verification record
 
-The final Family Computer source passed `npm test` with **22/22 tests** and passed `npm run build`. Tests cover the real client's command paths and bodies, mock transitions and deadlines, poller overlap/error/source handling, desktop window state, and selection of the newest Messenger messages in chronological order.
+### Current v2 checks
 
-The following were observed in the native Browser against the local frontend:
+The final v2 source passed `npm test` with **59/59 tests** and passed `npm run build` on macOS with Node.js 26 and npm 11.12. Automated coverage includes API paths/bodies, settings validation and concurrency, authoritative refresh after external changes, log cursors and buffers, unavailable/error monitoring states, photo 404/cancellation/object-URL cleanup, source isolation, and the existing scripted demo/window behavior.
+
+The following v2 checks were observed in the native Browser:
 
 | Area | Observed result |
 | --- | --- |
-| Study Control | Idle parse-error feedback, session start, trust override, and inline-confirmed stop worked. Starting a new task after a confirmed stop cleared the old "Session finished" notice. |
-| Tasks | Both a 30-minute start and Until due sent the selected task into a session and navigated to Today. |
-| Scripted demo | The approximately 100-second mock sequence progressed through nudge call, callback, and session end. Messenger displayed the received text events. |
-| Calls and activity | Call History displayed the supplied 48-second transcript fixture. Callback timeline search and transcript expansion worked. |
-| Desktop controls | Minimize, taskbar restore, maximize, Messenger restoration, Mom Menu focus, and Escape handling worked. |
-| Settings | Mock Test call and Force distracted worked with their expected UI controls. |
-| API-source switching | Switching to the unavailable real API showed an offline banner and cleared mock data; Use mock demo restored the mock interface. |
-| Preserved interfaces | All three classic themes switched successfully; the Style room passed a basic load check. |
-| Layout | No horizontal overflow was observed at 1440 px; in Today, Tasks, and Settings at 1024 px; or in Today (idle and active) and Tasks at 1920x1080. The 1920 px screenshots were visually inspected. |
-| Final mock console | No warnings or errors were reported in the final mock browser run after returning from the Style room. Earlier offline-test request failures are outside this result. |
+| Mock controls | All six settings changed and were restored. Demo timing showed 10/25/45-second thresholds; normal timing showed 120/300/300 seconds. |
+| Mock Eyes | Idle camera preview, Screen paused, Camera off, and active TikTok/Phone in hand states rendered with method and timing. Minimizing Eyes left zero displayed images; restoring it returned one preview image. |
+| Mock Log | Source filtering, pause/resume scrolling, and Clear view worked; newly received entries appeared after clearing. |
+| Layout | Eyes, Log, and Control Panel were checked at 1024, 1440, and 1920 px. The 1024 px Eyes panes stack and all six taskbar entries fit; no horizontal overflow was observed at 1024 or 1920 px. The three 1440 px views were visually checked. |
+| Complete mock regression | The approximately 100-second browser run completed through nudge, callback start/answer, final text, and session completion, with the matching entries visible in Mom’s Log. The final browser console had no warnings or errors. |
+| Preserved interfaces | All three classic themes were selected and checked again; the Style room loaded its heading. |
+| Real API reads | The user’s existing running backend supplied settings, state, and logs while its session remained idle. The log showed 26 entries from `main` and `api`. |
+| Real settings writes | All six controls received acknowledgements. Screen-off disabled Screenshot second look while idle camera preview continued. Camera-off removed the displayed image. |
+| Real camera preview | A 640x360 JPEG loaded through a memory-backed blob URL, with the latest server photo reported as 0 seconds old. No camera photo was saved to a file. |
+| Real restoration | The exact original settings below were restored and verified by GET equality. The real session was still idle. |
 
-Saved browser evidence:
+Restored real settings:
 
-- [Mock call notification](./screenshots/family-computer-call.png)
-- [Call History and transcript](./screenshots/family-computer-calls.png)
-- [Today at 1024 px](./screenshots/family-computer-1024.png)
-- [Tasks at 1024 px](./screenshots/family-computer-tasks-1024.png)
-- [Settings at 1024 px](./screenshots/family-computer-settings-1024.png)
-- [Idle Today at 1920 px](./screenshots/family-computer-1920.png)
-- [Active Today at 1920 px](./screenshots/family-computer-active-1920.png)
+```json
+{
+  "screen_monitoring": true,
+  "screenshots": true,
+  "webcam": true,
+  "detector_mode": "lockin",
+  "detector_llm": "gemini",
+  "demo_mode": true
+}
+```
 
-These checks have specific limits. Recovery from a previously connected real backend is covered by poller tests, not by a live browser integration run. The API configured on port 8765 was unreachable during the source-switch check. API request failures in that earlier offline check were expected and are separate from the clean final mock run. No backend files were modified and no backend process was started or restarted.
+Current saved screenshots contain **mock data only**:
 
-`git diff --check` passed. The root `.gitignore` changes contain only the two approved frontend-directory additions. No commit or push was made.
+- [Mom’s Eyes](./screenshots/v2-eyes.png)
+- [Mom’s Log](./screenshots/v2-log.png)
+- [Editable Control Panel](./screenshots/v2-controls.png)
+- [Stacked Eyes panes at 1024 px](./screenshots/v2-eyes-1024.png)
 
-Actual Windows execution, real phone calls, iMessage delivery, live screen detection, and live Canvas access remain unverified. Trello and Google Calendar are still coming-soon placeholders. The API client is ready for contract-based integration, but external services require a coordinated live run.
+### Historical pre-v2 checks
 
-## Backend integration work for Claude Code
+Before the monitoring extension, the Family Computer edition passed 22 tests and a production build. Native-browser checks covered the approximately 100-second mock sequence through nudge/callback/end, session validation/start/trust/confirmed stop, task starts using 30 minutes and Until due, Messenger events, transcripts/search, minimize/restore/maximize, menu focus/Escape, mock Test call/Force distracted, and classic theme/Style room smoke checks. Those results are historical and are not a claim that every flow was repeated during the current v2 browser run.
 
-1. Read the current Python API implementation without editing it. Compare payloads, nullability, timestamps, and command error shapes with `docs/UI_SPEC.md` and `src/api/types.ts`. Report mismatches to the backend owner rather than silently changing that session's files.
-2. When the backend owner has started the API, use the Vite development server with `?mock=0` to inspect state, events, task sources, and offline/recovery behavior. Do not restart their process without coordination.
-3. Check that real source errors, missing activity, missing deadlines, empty history, long goals/titles, and masked contact data render correctly. The frontend must never embed unmasked contact details.
-4. With user authorization for real communications, verify one real call/text scenario through the backend. A mock run does not authorize or prove a real call. Keep browser call status observational.
-5. Validate on Sean's Windows machine with the same npm commands. Record the actual Node/npm/browser versions and any platform-specific issue.
-6. Refresh the verification record and screenshots after meaningful UI changes. Leave the chosen direction and comparison routes intact unless Jay asks to change them.
+The earlier real-source check encountered an unavailable API and verified the offline banner, cleared mock state, and return to mock mode. That is also historical: the backend was available for the current v2 idle integration described above.
 
-No backend connection, actual-call test, deployment, commit, or push is claimed in this handoff.
+### Limits
+
+No real session, call, text, or active escalation was triggered for v2 verification. No backend files were modified, and no backend process was started or restarted. Actual Windows execution, backend-restart persistence, real active screen/camera judgment, live escalation, iMessage delivery, phone calls, and live Canvas access remain unverified. Recovery from a previously connected real backend is covered by poller tests, not a browser restart/recovery exercise. Hardware-unavailable, module-error, and missing-photo cases have automated coverage rather than a real-hardware browser fault exercise.
+
+The screen scanning animation is schedule-derived because the contract has no in-flight-check flag. Camera download age and server photo age remain separate. Trello and Google Calendar are still placeholders. No deployment, commit, or push was made.
+
+## Remaining integration work for Claude Code
+
+1. Read the latest Python API implementation without editing it and compare changes against `docs/UI_SPEC.md` sections 4 and 9. Preserve the already working idle reads/settings/photo/log integration; report contract drift to the backend owner.
+2. Validate on Sean’s Windows machine using the same npm commands. Record actual Node/npm/browser versions, platform availability flags, and their displayed reasons.
+3. Coordinate a backend restart test with its owner to confirm settings persist. Restore the original configuration afterward. Do not restart another session’s process independently.
+4. Only with explicit authorization for real communications, run an active session that exercises screen/camera judgment and escalation. The completed idle controls/preview check did not place calls or send messages and does not authorize them. Keep browser call status observational; no answer/hangup API exists.
+5. Exercise live reconnect/recovery and hardware errors with the backend owner when appropriate. Current tests cover these logic paths, but a real-process recovery run has not been performed.
+6. Refresh screenshots using mock imagery only, and update this verification record after meaningful changes. Preserve the selected Family Computer direction, classic themes, and Style room unless Jay requests otherwise.
 
 ## Ready-to-paste continuation prompt
 
-> Continue the Mom.exe Family Computer edition in `/Users/jay/Desktop/business/mom-exe` (use the equivalent checkout path on Windows). First read `~/.claude/CLAUDE.md`, applicable project instructions, `web/CLAUDE.md`, `docs/UI_SPEC.md`, `web/README.md`, and `web/CLAUDE_HANDOFF.md`, then inspect the current changes. Jay selected the Family Computer retro desktop as the default; preserve its visual direction, the classic dashboard, and the Style room. Work only inside `web/` and preserve other sessions' changes. Keep repository text in English and explain progress in Traditional Chinese. Verify the current implementation and finish any documented frontend gaps, then compare the existing API client with the backend contract read-only. Coordinate with the backend owner for live integration; do not invent browser answer/hangup endpoints or place real calls without authorization. Use mock mode for independent development. Run appropriate tests and the production build, check the real browser at 1024/1440/1920 px, and update the verification record with observed evidence. Never store secrets or phone numbers in `web/`, never use `git add -A`, and ask Jay before any push. Do not edit or restart the backend as part of this frontend task.
+> Continue Mom.exe Family Computer v2 in `/Users/jay/Desktop/business/mom-exe` (use the equivalent checkout path on Windows). Read `~/.claude/CLAUDE.md`, applicable project instructions, `web/CLAUDE.md`, all of `docs/UI_SPEC.md` including section 9, `web/README.md`, and `web/CLAUDE_HANDOFF.md`, then inspect current changes. Preserve the selected retro desktop, Mom’s Eyes, Mom’s Log, editable Control Panel, classic dashboard, and Style room. Work only inside `web/`; other sessions own the backend. Keep repository text in English and explain progress in Traditional Chinese. The current source passed 59 tests and a production build; idle real-API settings/log/photo integration was checked and original settings restored. Focus on the documented remaining gaps, especially Windows and coordinated persistence/live-judgment checks, without claiming that mock results prove real services. Keep one dashboard polling tree, serialized settings writes with authoritative refresh, cursor-based logs, and photo requests limited to a visible Eyes window. Never save real photos, secrets, or phone numbers in the repo. Do not invent browser answer/hangup endpoints or trigger real communications without explicit authorization. Do not edit or restart the backend independently. Run appropriate tests/build/browser checks after changes and update the evidence accurately. Never use `git add -A`, and ask Jay before any push.
