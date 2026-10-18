@@ -121,7 +121,7 @@ class Brain:
         if self.goal is None:
             return []
 
-        self.no_calls_until = now + timedelta(seconds=settings.CALL_AFTER_DISTRACTED_SECS)
+        self.no_calls_until = now + timedelta(seconds=max(10, settings.CALL_AFTER_DISTRACTED_SECS))
 
         if result.call_type == CallType.SNITCH:
             return [SendText("Mom just called your friend. 😌")] if result.answered else []

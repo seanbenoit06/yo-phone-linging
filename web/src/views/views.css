@@ -92,6 +92,7 @@
 .task-source { display: inline-flex; align-items: center; gap: 9px; flex-wrap: wrap; line-height: 1.6; }
 .task-source strong { color: var(--text); font-weight: 600; }
 .task-source-error { color: var(--danger); }
+.task-calendar-toggle { margin-left: auto; }
 .task-load-error { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 20px; border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--line)); border-radius: 12px; padding: 16px 18px; color: var(--danger); background: color-mix(in srgb, var(--danger) 5%, var(--card)); font-size: 16px; line-height: 1.6; }
 .task-load-error > svg { margin-top: 3px; }
 .tasks-view .task-group .view-section-heading { margin-top: 30px; margin-bottom: 13px; }

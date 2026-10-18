@@ -139,6 +139,8 @@ Changes (live agent updated through the API; previous values in parentheses, for
 - LLM `temperature`: 0.5 (was 0.0) so she doesn't repeat the same lines.
 - `turn.turn_eagerness`: `eager` (was `normal`) so she answers sooner.
 - `tts.speed`: 1.08 (was 1.0).
+- `turn.turn_timeout`: 3 (was 5). Live calls on 2026-10-18 showed a trailing-off reply ("Okay, I...") left
+  5.6 s of silence before Mom answered "Hmm? Say again", and the user hung up. Rollback: 5.
 
 Text-only simulations (4 cases): fake excuse called out ("Tutorials on Instagram? Aiyah, Mom not born
 yesterday."), rudeness ("Excuse me?! You talk to your mother like that? Okay, problem two."), "do it for me"

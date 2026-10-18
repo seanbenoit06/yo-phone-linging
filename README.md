@@ -26,8 +26,8 @@ first step, the way a mom would.
 ```mermaid
 flowchart LR
     A["Start a session<br/>dashboard, iMessage or a Canvas task"] --> B{"Drifting?<br/>screen + webcam"}
-    B -->|"10 s demo · 2 min real"| C["Check-in iMessage<br/>'Jay, what are you doing? TikTok??'"]
-    C -->|"25 s demo · 5 min real"| D["Phone call<br/>one 5-minute step + a promise"]
+    B -->|"instant in demo · 2 min real"| C["Check-in iMessage<br/>'Jay, what are you doing? TikTok??'"]
+    C -->|"right after in demo · 5 min real"| D["Phone call<br/>one 5-minute step + a promise"]
     D -->|answered| E["Follow-up text<br/>quoting your promise"]
     E -->|"45 s demo · 5 min real"| F["Callback<br/>'Did you do it?'"]
     D -->|ignored| G["Calls a friend<br/>you opted in"]
@@ -125,7 +125,7 @@ flowchart LR
 | Phone-in-hand detection | Gemini caught 6/6 phones in frame, 0 false alarms in 9 no-phone shots | our benchmark of 5 vision models on hand-labeled webcam shots |
 | Flagging TikTok / Instagram / Shorts | instant (rules, no AI call) | `detector.py` |
 | Judging an unclear window | about 0.8 s (title) / 1.6 s (with screenshot) | Gemini 3.5 Flash-Lite |
-| Automated tests | 59 dashboard + 61 calendar | `cd web && npm test`, `pytest tests` |
+| Automated tests | 86 dashboard + 61 backend | `cd web && npm test`, `pytest tests` |
 
 ## Privacy and safety
 

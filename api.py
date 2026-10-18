@@ -192,10 +192,12 @@ class DashboardApi:
             raise BadRequest(reason or "No photo yet.", status=404)
         return jpeg
 
-    def tasks(self):
-        """GET /api/tasks. tasks.get_tasks() caches, locks and never raises, so it runs on this thread."""
+    def tasks(self, refresh=None):
+        """GET /api/tasks[?refresh=<source>]. tasks.get_tasks() caches, locks and never raises, so it runs on this thread."""
         try:
-            from tasks import get_tasks
+            from tasks import SOURCES, forget, get_tasks
+            if refresh in SOURCES:
+                forget(refresh)
             items, sources = get_tasks()
             return {
                 "tasks": [_task_json(task) for task in items],
@@ -378,7 +380,7 @@ class _Handler(BaseHTTPRequestHandler):
             elif method == "GET" and url.path == "/api/events":
                 self._send(200, {"events": api.events_after(_after(url.query))})
             elif method == "GET" and url.path == "/api/tasks":
-                self._send(200, api.tasks())
+                self._send(200, api.tasks(parse_qs(url.query).get("refresh", [None])[0]))
             elif method == "GET" and url.path == "/api/settings":
                 self._send(200, api.settings_info())
             elif method == "GET" and url.path == "/api/logs":

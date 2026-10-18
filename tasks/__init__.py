@@ -22,6 +22,7 @@ SOURCES = {
 
 CACHE_SECS = 5 * 60
 ERROR_RETRY_SECS = 60  # a failed source is retried sooner than a healthy one is refreshed
+SOURCE_CACHE_SECS = {"calendar": 60}  # new meetings should show up within a minute
 
 _cache = {}  # name → (expires_at monotonic, tasks, status)
 _lock = threading.Lock()  # api.py serves requests on threads; fetch each source once
@@ -41,6 +42,12 @@ def get_tasks():
 def clear_cache():
     with _lock:
         _cache.clear()
+
+
+def forget(name):
+    """Drop one source's cache, so the next get_tasks() fetches it again (the dashboard's refresh button)."""
+    with _lock:
+        _cache.pop(name, None)
 
 
 def _cached(name):
@@ -63,7 +70,7 @@ def _cached(name):
             message = getattr(module, "OFF_MESSAGE", None) or f"{name} isn't connected."
             return [], _status("off", message=message)
         tasks = list(fetch())
-        status, ttl = _status("ok", synced_at=datetime.now().astimezone()), CACHE_SECS
+        status, ttl = _status("ok", synced_at=datetime.now().astimezone()), SOURCE_CACHE_SECS.get(name, CACHE_SECS)
     except Exception as exc:
         tasks, ttl = [], ERROR_RETRY_SECS
         # Errors raised by our source modules are readable and secret-free; anything else is a bug.

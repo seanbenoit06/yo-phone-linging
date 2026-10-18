@@ -26,9 +26,9 @@ def apply_demo_mode(on):
     def pick(demo, real):
         return demo if DEMO_MODE else real
 
-    DETECT_EVERY_SECS = pick(3, 20)               # how often main.py checks the screen
-    TEXT_AFTER_DISTRACTED_SECS = pick(10, 2 * 60)  # distracted this long → iMessage "?"
-    CALL_AFTER_DISTRACTED_SECS = pick(25, 5 * 60)  # distracted this long → phone call
+    DETECT_EVERY_SECS = pick(2, 20)               # how often main.py checks the screen
+    TEXT_AFTER_DISTRACTED_SECS = pick(0, 2 * 60)  # distracted this long → iMessage "?"
+    CALL_AFTER_DISTRACTED_SECS = pick(0, 5 * 60)  # distracted this long → phone call
     CALLBACK_AFTER_SECS = pick(45, 5 * 60)        # after a promise on the call → call back
     # After an answered call, a new distraction streak can't start for this long, so the TikTok tab
     # left open during the call (or the phone you just talked on) doesn't restart the ladder.

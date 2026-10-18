@@ -63,7 +63,7 @@ export function createRealApi(fetcher: typeof fetch = (...args) => fetch(...args
   return {
     getState: () => request<State>("/state"),
     getEvents: (after) => request<{ events: Event[] }>(`/events?after=${Math.max(0, Math.floor(after))}`),
-    getTasks: () => request<TaskResponse>("/tasks"),
+    getTasks: (refresh) => request<TaskResponse>(refresh ? `/tasks?refresh=${encodeURIComponent(refresh)}` : "/tasks"),
     getSettings: () => request<SettingsResponse>("/settings"),
     updateSettings: (patch) => request<SettingsResponse & { ok: true }>("/settings", patch),
     getLogs: (after) => request<LogsResponse>(`/logs?after=${Number.isFinite(after) ? Math.max(0, Math.floor(after)) : 0}`),

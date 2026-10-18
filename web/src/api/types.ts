@@ -142,7 +142,7 @@ export interface GuestCallInput {
 export interface ApiClient {
   getState(): Promise<State>;
   getEvents(after: number): Promise<{ events: Event[] }>;
-  getTasks(): Promise<TaskResponse>;
+  getTasks(refresh?: Task['source']): Promise<TaskResponse>;
   getSettings(): Promise<SettingsResponse>;
   updateSettings(patch: SettingsPatch): Promise<SettingsResponse & { ok: true }>;
   getLogs(after: number): Promise<LogsResponse>;
