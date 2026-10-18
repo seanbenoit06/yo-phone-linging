@@ -10,3 +10,5 @@ state/
 # Google OAuth files (calendar feature)
 credentials.json
 token.json
+web/node_modules/
+web/dist/
