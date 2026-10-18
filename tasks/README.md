@@ -23,7 +23,8 @@ python -c "from tasks import get_tasks; print(get_tasks())"
   It expires and dies on logout; then status is "error" with copy-it-again steps. `CANVAS_TOKEN`
   still works (and wins) for schools that allow tokens. Rejected: the Calendar Feed `.ics` URL,
   which never expires but can't tell submitted work apart and has no points.
-- **Planner API** `GET /api/v1/planner/items`, today 00:00 → +14 days, `filter=incomplete_items`,
+- **Planner API** `GET /api/v1/planner/items`, 7 days ago 00:00 → today +14 days (so the
+  dashboard's Overdue group shows unsubmitted work from the past week), `filter=incomplete_items`,
   following `Link rel="next"`. The token is only ever sent to `CANVAS_BASE_URL`.
 - **Skipped items**: submitted (`submissions.submitted`), marked done in the planner, announcements.
 - **`context`** is the course code (`MATH 208`, `A A 210`), or the full `context_name` if there is none.

@@ -23,6 +23,7 @@ except ImportError:  # Python < 3.10, or not installed
     pass
 
 DEFAULT_BASE_URL = "https://canvas.uw.edu"
+DAYS_BACK = 7  # overdue, unsubmitted work from the past week still shows up
 DAYS_AHEAD = 14
 TIMEOUT_SECS = 15
 MAX_PAGES = 20  # 50 items per page; stops a broken Link header from looping forever
@@ -47,7 +48,7 @@ def is_configured():
 
 
 def fetch_canvas_tasks():
-    """Unsubmitted Canvas items due from today 00:00 to today + 14 days. Raises CanvasError."""
+    """Unsubmitted Canvas items due from 7 days ago (00:00) to today + 14 days. Raises CanvasError."""
     auth_headers, auth_kind = _auth()
     if auth_headers is None:
         raise CanvasError(f"Canvas isn't connected. {COOKIE_HELP}")
@@ -55,7 +56,7 @@ def fetch_canvas_tasks():
 
     today = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
     params = {
-        "start_date": today.isoformat(),
+        "start_date": (today - timedelta(days=DAYS_BACK)).isoformat(),
         "end_date": (today + timedelta(days=DAYS_AHEAD)).isoformat(),
         "filter": "incomplete_items",
         "per_page": 50,
@@ -214,7 +215,7 @@ def main():
         fail(str(exc))
 
     now = datetime.now().astimezone()
-    print(f"Canvas ({_base_url()}): {len(tasks)} unsubmitted, due in the next {DAYS_AHEAD} days\n")
+    print(f"Canvas ({_base_url()}): {len(tasks)} unsubmitted, due from {DAYS_BACK} days ago to {DAYS_AHEAD} days ahead\n")
     for task in tasks:
         if task.due_at:
             due = f"{_until(task.due_at, now):<12} {task.due_at:%a %b %d %I:%M %p}"
