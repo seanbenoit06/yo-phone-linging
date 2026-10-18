@@ -15,6 +15,7 @@ from datetime import datetime
 
 SOURCES = {
     "canvas": "tasks.canvas:fetch_canvas_tasks",
+    "trello": "tasks.trello:fetch_trello_tasks",
 }
 
 CACHE_SECS = 5 * 60
