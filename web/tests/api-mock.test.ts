@@ -55,7 +55,7 @@ test("the complete demo follows thresholds, preserves the real transcript, and f
   const events = (await api.getEvents(0)).events;
   assert.deepEqual(events.filter((event) => event.kind === "text_out").map((event) => event.data.text), [
     "OK Jay. CSE homework until 9:00 PM. Mom is watching. 👀",
-    "?",
+    "Jay, what are you doing? TikTok?? You said CSE homework. Mom is watching 👀",
     "You promised Mom: open your laptop and find the file. I'm calling back in 1 min. Don't make me call your cousin.",
     "Good. Mom is proud. Now keep going.",
   ]);

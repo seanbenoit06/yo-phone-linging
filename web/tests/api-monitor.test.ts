@@ -169,7 +169,7 @@ test("forced checks use the forced badge and logs preserve event order, source v
   advance(25);
   const logs = (await api.getLogs(0)).lines;
   assert.ok(logs.some((line) => line.source === "detect" && line.message === "distracted: Instagram"));
-  assert.ok(logs.some((line) => line.source === "text" && line.message === "→ ?"));
+  assert.ok(logs.some((line) => line.source === "text" && line.message.startsWith("→ ") && line.message.includes("what are you doing")));
   assert.ok(logs.some((line) => line.source === "call" && line.message.includes("nudge call starting")));
   assert.ok(logs.every((line, index) => index === 0 || (line.id > logs[index - 1].id && Date.parse(line.at) >= Date.parse(logs[index - 1].at))));
   assert.equal((await api.getLogs(logs.at(-1)!.id)).lines.length, 0);

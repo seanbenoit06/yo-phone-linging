@@ -283,7 +283,9 @@ export function createMockApi(now: () => number = Date.now, options: MockOptions
     if (state.stage !== "texted") schedule("text", Math.max(0, state.ladder.text_after_secs - elapsed), () => {
       if (!canEscalate() || state.verdict?.focus !== "distracted") return;
       state.stage = "texted";
-      sendText("?");
+      // Same wording as brain.py's first check-in text.
+      const distraction = state.verdict?.distraction || "that";
+      sendText(`${state.user_name}, what are you doing? ${distraction}?? You said ${state.session?.goal ?? "your task"}. Mom is watching 👀`);
     });
     schedule("nudge", Math.max(0, state.ladder.call_after_secs - elapsed), () => {
       if (canEscalate() && state.verdict?.focus === "distracted") startCall("nudge", true);

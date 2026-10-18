@@ -7,7 +7,7 @@ iMessage + screen (+ webcam) → main.py → brain.py → ElevenLabs API → Pho
 ```
 
 `main.py` is the app: it reads your iMessages, watches your screen, and lets `brain.py` (the
-escalation state machine) decide when Mom texts `?`, calls, calls back, or calls your opted-in
+escalation state machine) decide when Mom sends a check-in text, calls, calls back, or calls your opted-in
 friend. See [INTERFACES.md](INTERFACES.md) for how the modules fit together and who owns what.
 
 `mom/` holds the trigger framework (`mom/triggers/`), where the calendar feature is being built.
@@ -51,7 +51,7 @@ npm run dev                        # then open http://localhost:3000/?mock=0
 
 Start a session from the dashboard (type `MATH 208 homework until 11 PM`, or pick a task and
 **Start with Mom**), or text the agent on iMessage. Mom watches your screen (and webcam with
-`USE_WEBCAM=1`), texts `?` when you drift, calls you if you keep going, texts a follow-up quoting
+`USE_WEBCAM=1`), sends a check-in text when you drift ("what are you doing? TikTok?? You said MATH 208..."), calls you if you keep going, texts a follow-up quoting
 your promise, calls back later, and calls `FRIEND_PHONE_NUMBER` if you ignore her.
 Set `DEMO_MODE=1` in `.env` so the whole ladder fits in a 3-minute demo.
 `http://localhost:3000/?mock=1` plays a scripted demo without the Python app.

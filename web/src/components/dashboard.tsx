@@ -77,7 +77,7 @@ export function Ladder({ state, now, events }: { state: State; now: number; even
   const elapsed = state.distracted_since ? Math.max(0, (now - Date.parse(state.distracted_since)) / 1000) : 0;
   const next = state.stage === 'texted' ? state.ladder.call_after_secs : state.ladder.text_after_secs;
   const current = state.call_in_progress?.call_type === 'callback' ? 3 : stepIndex[state.stage];
-  const steps = [{ label: 'Watching', icon: Eye }, { label: '“?” text', icon: MessageCircle }, { label: 'Call', icon: Phone }, { label: 'Callback', icon: Clock3 }];
+  const steps = [{ label: 'Watching', icon: Eye }, { label: 'Check-in text', icon: MessageCircle }, { label: 'Call', icon: Phone }, { label: 'Callback', icon: Clock3 }];
   const snitched = events.some((event) => (event.kind === 'call_started' || event.kind === 'call_ended') && event.data.call_type === 'snitch' && Date.parse(event.at) >= Date.parse(state.session!.started_at));
   return <section className="card ladder-card" aria-label="Escalation ladder">
     <div className="card-title-row"><h3 className="section-label">A LITTLE ACCOUNTABILITY</h3><span className="muted">Mom’s got your back</span></div>

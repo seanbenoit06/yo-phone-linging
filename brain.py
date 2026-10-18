@@ -17,6 +17,17 @@ from models import CallType, Focus, IntentKind, PlaceCall, SendText
 
 MAX_EXCUSES_TO_SEND = 3
 
+# The first nudge: a text before the call. Rotates within a session so Mom doesn't repeat herself.
+CHECK_IN_TEXTS = [
+    "{name}, what are you doing? {distraction}?? You said {goal}. Mom is watching 👀",
+    "Why are you on {distraction}? You said {goal}. I'm watching 👀",
+    "{distraction} is not {goal}. Mom can see you 👀",
+]
+PHONE_CHECK_IN_TEXTS = [
+    "Why are you on your phone? Mom can see you 👀 Back to {goal}.",
+    "Phone down, {name}. You said {goal}. I'm watching 👀",
+]
+
 
 def _activity_key(activity):
     return activity.url or f"{activity.app}|{activity.title}"
@@ -83,7 +94,7 @@ class Brain:
         actions = []
         if not self.texted and distracted_for >= settings.TEXT_AFTER_DISTRACTED_SECS:
             self.texted = True
-            actions.append(SendText("?"))
+            actions.append(SendText(self._check_in_text()))
         if distracted_for >= settings.CALL_AFTER_DISTRACTED_SECS and self._calls_allowed(now):
             self.callback_at = None  # a fresh nudge replaces any pending callback
             actions.append(self._call(self.user_phone, CallType.NUDGE, now))
@@ -168,11 +179,19 @@ class Brain:
         self.last_promise = None
         self.callback_at = None
         self.no_calls_until = None
+        self.check_ins = 0         # check-in texts sent this session, to rotate CHECK_IN_TEXTS
         self._reset_streak()
 
     def _reset_streak(self):
         self.distracted_since = None
         self.texted = False
+
+    def _check_in_text(self):
+        on_phone = (self.distraction or "").lower() == "your phone"
+        templates = PHONE_CHECK_IN_TEXTS if on_phone else CHECK_IN_TEXTS
+        text = templates[self.check_ins % len(templates)]
+        self.check_ins += 1
+        return text.format(name=self.user_name, distraction=self.distraction or "that", goal=self.goal)
 
     def _calls_allowed(self, now):
         return self.no_calls_until is None or now >= self.no_calls_until

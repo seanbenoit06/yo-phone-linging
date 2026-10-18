@@ -31,7 +31,7 @@ An AI agent that phone-calls you when you procrastinate.
 4. Terminal 2: `cd web && npm install && npm run dev` → `http://localhost:3000/?mock=0`
    (`?mock=1` plays a scripted demo without the Python app).
 5. Start a session in the dashboard (`MATH 208 homework until 11 PM`) or by iMessage. With `DEMO_MODE=1`:
-   distracted 10 s → "?" text, 25 s → call, callback 45 s after a promise.
+   distracted 10 s → check-in text, 25 s → call, callback 45 s after a promise.
 6. The dashboard's Control Panel switches (screen, screenshots, camera, lock-in, demo timing, AI model) are
    saved in `state/settings.json` and override `.env`. Delete that file to go back to the `.env` values.
 

@@ -35,7 +35,7 @@ iMessage (texter/intent) + screen (detector) + webcam (optional)
 
 ### 🔨 Phase 2: the full escalation loop (see `INTERFACES.md`)
 - [x] Core: `models.py`, `settings.py`, `caller.py`, `brain.py`, `main.py`
-- [x] Ladder: `?` text → nudge call → follow-up text quoting the promise → callback → snitch call to an opted-in friend
+- [x] Ladder: check-in text ("what are you doing? TikTok?? ...") → nudge call → follow-up text quoting the promise → callback → snitch call to an opted-in friend
 - [x] "I'm actually working" → apologize and never flag that activity again this session
 - [x] iMessage: `texter.py` + `intent.py` (Photon shared line, proactive "?" verified)
 - [x] Detector: `detector.py` (window / tab title + rules + Gemini, iPhone Mirroring counts as the phone)
@@ -45,7 +45,7 @@ iMessage (texter/intent) + screen (detector) + webcam (optional)
 - [x] Calendar daily briefing call (Sean) → [docs/features/calendar.md](docs/features/calendar.md)
 - [x] Dashboard: `web/` (Family Computer edition) + `api.py`, tested against the live API
 - [x] Tasks: Canvas (browser cookie, UW blocks tokens), Trello (one board, read-only), Google Calendar (next 7 days)
-- [ ] End-to-end demo run with `DEMO_MODE=1` (dashboard → "?" text → call → follow-up → callback)
+- [ ] End-to-end demo run with `DEMO_MODE=1` (dashboard → check-in text → call → follow-up → callback)
 
 ### 💡 Later
 - [ ] Run the calendar briefing from `main.py` on a schedule

@@ -9,7 +9,7 @@ built separately by the core owner. Until that API exists, the UI runs on a **mo
 Mom.exe is an AI accountability "Asian mom". While you work, it watches your screen. When you drift
 (TikTok, Instagram, ...), it climbs an escalation ladder:
 
-1. Distracted for a while → Mom texts you **"?"** on iMessage
+1. Distracted for a while → Mom texts you a check-in on iMessage ("Jay, what are you doing? TikTok?? You said CSE homework. Mom is watching 👀")
 2. Still distracted → Mom **phone-calls** you. On the call she asks what's blocking you, breaks the
    task into ONE 5-minute step, and gets a verbal promise.
 3. After the call → follow-up text quoting your promise → Mom **calls back** later to check.
@@ -59,7 +59,7 @@ Top to bottom, with a right column on wide screens:
    - **Active**: headline "{goal}" with "until {9:00 PM}" and time left (or "no deadline"),
      buttons **I'm actually working** and **Done** (stops the session; ask for an inline confirm first).
 3. **Escalation ladder** (only in an active session): a horizontal stepper
-   `Watching → "?" text → Call → Callback`, plus a separate `Snitch` marker shown only if it happened.
+   `Watching → Check-in text → Call → Callback`, plus a separate `Snitch` marker shown only if it happened.
    Highlight the current `stage`. While distracted, show a live timer
    ("Distracted 0:18 · call at 0:25") with a progress bar toward the next step, using `ladder` thresholds.
    While calling, pulse the Call step and show "Mom is on the phone…".
@@ -244,7 +244,7 @@ The UI must run fully without the Python app, so it can be built and demoed in p
   or `VITE_USE_MOCK=1`.
 - The mock plays a scripted demo with `demo_mode: true` timings (text at 10 s, call at 25 s,
   callback at 45 s): idle → `POST /api/session/start` → watching → distracted on TikTok →
-  `"?"` text → calling (≈15 s) → `call_ended` with the transcript below → promise text →
+  check-in text → calling (≈15 s) → `call_ended` with the transcript below → promise text →
   waiting_callback → callback call → done. Commands work against the mock state.
 
 Use this real transcript (from a live test call) for the mock `call_ended`:
@@ -274,7 +274,7 @@ Mock `GET /api/tasks` with realistic UW courses, for example (due dates relative
 `sources`: `{ "canvas": { "status": "ok", "synced_at": <now - 2 min> } }`.
 
 Mom's real text messages, for mock `text_out` events:
-`OK Jay. CSE homework until 9:00 PM. Mom is watching. 👀` · `?` ·
+`OK Jay. CSE homework until 9:00 PM. Mom is watching. 👀` · `Jay, what are you doing? TikTok?? You said CSE homework. Mom is watching 👀` ·
 `You promised Mom: open your laptop and find the file. I'm calling back in 1 min. Don't make me call your cousin.` ·
 `Good. Mom is proud. Now keep going.`
 

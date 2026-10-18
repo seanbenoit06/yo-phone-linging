@@ -136,7 +136,7 @@ Data Collection fields `caller.to_call_result()` reads after each call (exact na
 
 | Step | Real | `DEMO_MODE=1` |
 |---|---|---|
-| Distracted → iMessage `?` | 2 min | 10 s |
+| Distracted → check-in iMessage | 2 min | 10 s |
 | Distracted → nudge call | 5 min | 25 s |
 | Promise made → callback call | 5 min | 45 s |
 | Ignored calls before calling `FRIEND_PHONE_NUMBER` | 1 | 1 |
