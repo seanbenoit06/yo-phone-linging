@@ -139,6 +139,7 @@ Data Collection fields `caller.to_call_result()` reads after each call (exact na
 | Distracted → check-in iMessage | 2 min | 10 s |
 | Distracted → nudge call | 5 min | 25 s |
 | Promise made → callback call | 5 min | 45 s |
+| Answered call → no new distraction streak for | 1 min | 20 s |
 | Ignored calls before calling `FRIEND_PHONE_NUMBER` | 1 | 1 |
 
 ## Working in parallel

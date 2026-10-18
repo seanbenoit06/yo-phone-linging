@@ -151,6 +151,7 @@ class MomLoop:
         self.cam_lock = threading.Lock()
         # Latest judged photo: (monotonic time, Verdict or None, Exception or None, judged_at, latency_ms).
         self.cam_result = None
+        self.cam_epoch = 0                 # bumped when a session starts/ends; a check from before is dropped
         self.cam_preview_error = None      # why the last preview photo failed (webcam thread)
         # monitor.screen for the dashboard: when and how the screen was last checked.
         self.screen_check = {"at": None, "method": None, "latency_ms": None}
@@ -258,9 +259,12 @@ class MomLoop:
 
         if self.webcam and controls.webcam_enabled():
             cam = self.safely("webcam", self.latest_webcam_verdict)
-            # With the screen on, the webcam only adds evidence: phone in hand beats an on-task screen.
+            # With the screen on, the webcam only adds evidence: phone in hand beats an on-task screen,
+            # but a distracting screen keeps its own label (TikTok stays TikTok on the call).
             # With the screen off, the webcam is all Mom has, so its "focused" counts too.
-            if cam and (cam.focus == Focus.DISTRACTED or not screen_on):
+            screen_distracted = (verdict is not None and verdict.focus == Focus.DISTRACTED
+                                 and _activity_key(activity) not in self.brain.allowed)
+            if cam and ((cam.focus == Focus.DISTRACTED and not screen_distracted) or not screen_on):
                 activity, verdict = Activity(app="webcam", title="phone in hand" if cam.distraction else "camera"), cam
         return activity, verdict
 
@@ -276,6 +280,8 @@ class MomLoop:
                 self.cam_preview_error = None
                 time.sleep(1)
             elif self.brain.goal:
+                with self.cam_lock:
+                    epoch = self.cam_epoch
                 started = time.monotonic()
                 try:
                     cam, error = self.webcam.check(), None
@@ -283,7 +289,8 @@ class MomLoop:
                     cam, error = None, err
                 latency_ms = round((time.monotonic() - started) * 1000)
                 with self.cam_lock:
-                    self.cam_result = (time.monotonic(), cam, error, datetime.now(), latency_ms)
+                    if self.cam_epoch == epoch:  # the session didn't stop or restart during the ~3 s check
+                        self.cam_result = (time.monotonic(), cam, error, datetime.now(), latency_ms)
                 self.cam_preview_error = None
                 time.sleep(settings.DETECT_EVERY_SECS)
             elif self.api.preview_wanted():
@@ -487,6 +494,7 @@ class MomLoop:
         self.session_started_at = datetime.now()
         with self.cam_lock:
             self.cam_result = None  # a phone seen before this session started doesn't count
+            self.cam_epoch += 1
         self.last_detect_tick = time.monotonic()
         self.activity = self.verdict = self.last_focus = None
         self.forced = self.forced_until = None
@@ -499,6 +507,7 @@ class MomLoop:
         self.session_started_at = None
         with self.cam_lock:
             self.cam_result = None  # Mom only judges photos during a session
+            self.cam_epoch += 1
         self.activity = self.verdict = self.last_focus = None
         self.forced = self.forced_until = None
         summary = f"Session ended: {goal}" + (" (time's up)" if reason == "time_up" else "")

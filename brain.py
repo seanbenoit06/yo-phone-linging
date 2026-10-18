@@ -5,6 +5,7 @@ with the current time and executes the actions it returns (SendText / PlaceCall)
 
 Ladder: distracted → TEXT_AFTER → iMessage "?" → CALL_AFTER → nudge call
         → answered: follow-up text with the promise, then one callback later
+                    (a short grace window first, so the screen left open during the call doesn't count)
         → ignored:  text, keep counting, call again; after SNITCH_AFTER_MISSED_CALLS
                     call the opted-in friend (once per session)
 """
@@ -56,8 +57,11 @@ class Brain:
             return [SendText('Tell Mom what you\'re working on, like: "CSE homework until 9 PM"')]
 
         if intent.kind == IntentKind.NOT_DISTRACTED:
-            if self.last_activity:
-                self.allowed.add(_activity_key(self.last_activity))
+            # The thing Mom flagged, not the current screen: the dashboard button is pressed
+            # from the dashboard, which would otherwise be what gets trusted.
+            target = self.last_distracting_activity or self.last_activity
+            if target:
+                self.allowed.add(_activity_key(target))
             self._reset_streak()
             return [SendText("Sorry sorry. Mom believes you. I won't bug you about that again. ❤️")]
 
@@ -76,12 +80,16 @@ class Brain:
         focus = verdict.focus
         if _activity_key(activity) in self.allowed:
             focus = Focus.ON_TASK
+        if focus == Focus.DISTRACTED:
+            self.last_distracting_activity = activity
 
         if focus == Focus.ON_TASK:
             self._reset_streak()
             return []
         if focus == Focus.UNSURE and self.distracted_since is None:
             return []
+        if self.distracted_since is None and self.grace_until and now < self.grace_until:
+            return []  # just hung up with Mom: time to close TikTok / put the phone down
 
         # DISTRACTED, or UNSURE in the middle of a distraction streak (e.g. glancing at the
         # dashboard): an unclear screen isn't proof you're back to work, so the clock keeps running.
@@ -96,8 +104,10 @@ class Brain:
             self.texted = True
             actions.append(SendText(self._check_in_text()))
         if distracted_for >= settings.CALL_AFTER_DISTRACTED_SECS and self._calls_allowed(now):
-            self.callback_at = None  # a fresh nudge replaces any pending callback
-            actions.append(self._call(self.user_phone, CallType.NUDGE, now))
+            # A pending callback (promise made) comes early instead of being replaced by a new nudge.
+            call_type = CallType.CALLBACK if self.callback_at else CallType.NUDGE
+            self.callback_at = None
+            actions.append(self._call(self.user_phone, call_type, now))
         return actions
 
     def on_call_ended(self, result, now):
@@ -122,6 +132,7 @@ class Brain:
 
         self.missed_calls = 0
         self._reset_streak()
+        self.grace_until = now + timedelta(seconds=settings.POST_CALL_GRACE_SECS)
         if result.excuse:
             self.excuses.append(result.excuse)
 
@@ -173,6 +184,8 @@ class Brain:
 
     def _reset_session_state(self):
         self.allowed = set()       # activities the user said are actually work
+        self.last_distracting_activity = None  # what "I'm actually working" whitelists
+        self.grace_until = None    # no new distraction streak before this (right after an answered call)
         self.distraction = None
         self.missed_calls = 0
         self.snitched = False

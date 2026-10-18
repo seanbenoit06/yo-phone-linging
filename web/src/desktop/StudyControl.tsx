@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { ArrowRight, Check, CheckCheck, ChevronRight, Clock3, Info, LoaderCircle, Monitor, ShieldCheck } from 'lucide-react';
 import type { ApiClient, CommandResult, State, Task } from '../api/types';
 import { TaskStartPicker } from '../components/TaskStartPicker';
+import { statAmount } from '../components/dashboard';
 import { conceptAccents } from '../themes/themes';
 import './study.css';
 
@@ -52,7 +53,7 @@ export function StudyControl({ state, api, refresh, now, tasks, disabled = false
   const blocked = disabled || pending !== null;
   const until = active?.until ? Date.parse(active.until) : NaN;
   const remaining = Number.isFinite(until) ? Math.max(0, Math.ceil((until - now) / 60_000)) : null;
-  const focusedMinutes = Math.floor(Math.max(0, state.stats.focused_secs) / 60);
+  const focusedTime = statAmount(state.stats.focused_secs);
   const distracted = state.stage === 'distracted' || state.stage === 'texted';
 
   useEffect(() => {
@@ -134,7 +135,7 @@ export function StudyControl({ state, api, refresh, now, tasks, disabled = false
       <div className="fc-study-session-label"><span><i /> Session in progress</span><span>{state.demo_mode ? 'Demo mode' : 'Focus mode'}</span></div>
       <h2>{active.goal}</h2>
       <p className="fc-study-deadline"><Clock3 size={19} aria-hidden="true" />{active.until ? <><span>until {deadlineTime(active.until)}</span><span aria-hidden="true">·</span><strong>{remaining === null ? 'Time unavailable' : remaining === 0 ? 'Wrapping up' : `${remaining} min left`}</strong></> : <span>No deadline. One step at a time.</span>}</p>
-      <div className="fc-study-meter"><div><strong>{focusedMinutes}<span> min</span></strong><p>Total focused time today</p></div><span className="fc-study-monitor" aria-hidden="true"><Monitor size={49} /><Check size={21} /></span></div>
+      <div className="fc-study-meter"><div><strong>{focusedTime.amount}<span> {focusedTime.unit}</span></strong><p>Total focused time today</p></div><span className="fc-study-monitor" aria-hidden="true"><Monitor size={49} /><Check size={21} /></span></div>
       <div className="fc-study-actions"><button type="button" className="fc-study-button" disabled={blocked} onClick={() => void run('trust', () => api.notDistracted())}>{pending === 'trust' ? <LoaderCircle size={18} className="fc-study-spin" aria-hidden="true" /> : <ShieldCheck size={18} aria-hidden="true" />}I’m actually working</button><button type="button" className="fc-study-button fc-study-primary" disabled={blocked} onClick={() => { setConfirmStop(true); setError(''); setNotice(''); }}><Check size={18} aria-hidden="true" />Done</button></div>
       {confirmStop && <div className="fc-study-confirm" role="group" aria-label="Confirm end session"><p>All done? Save your progress and end this session?</p><div><button type="button" className="fc-study-button fc-study-primary" disabled={blocked} onClick={() => void run('stop', () => api.stopSession())}>{pending === 'stop' && <LoaderCircle size={18} className="fc-study-spin" aria-hidden="true" />}{pending === 'stop' ? 'Ending session…' : 'Yes, I’m done'}</button><button type="button" className="fc-study-button" disabled={blocked} onClick={() => setConfirmStop(false)}>Keep going</button></div></div>}
     </div> : <>

@@ -241,7 +241,7 @@ export function createMockApi(now: () => number = Date.now, options: MockOptions
         { role: "agent", time_in_call_secs: 0, message: "Jay, did you open your laptop and find the file?" },
         { role: "user", time_in_call_secs: 4, message: "Yes, I found it. I'm starting now." },
         { role: "agent", time_in_call_secs: 7, message: "Good. Mom is proud. Now keep going." },
-      ] : copy(NUDGE_TRANSCRIPT),
+      ] : copy(NUDGE_TRANSCRIPT).map((line) => ({ ...line, message: line.message.replace("CSE homework", state.session?.goal ?? "CSE homework") })),
     };
     emit("call_ended", callType === "callback" ? "Callback answered. Promise kept." : "Call answered. One tiny step agreed.", data);
     state.last_promise = PROMISE;

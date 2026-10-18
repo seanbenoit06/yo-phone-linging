@@ -15,6 +15,7 @@ from models import Intent, IntentKind
 STOP = re.compile(
     r"""^(?:ok(?:ay)?\W+)?(?:i'?m\s+|i\s+am\s+|all\s+|i\s+)?
         (?:done|finished|stop|quit|end\s+session|stop\s+session)
+        (?:\s+with\s+(?:my\s+|the\s+|this\s+)?(?:homework|hw|work|it|this|that|everything|session))?
         (?:\s+for\s+(?:today|tonight|now))?(?:\s+mom)?\W*$
       | ^stop\b""",
     re.IGNORECASE | re.VERBOSE,
@@ -126,6 +127,8 @@ EXAMPLES = [
     ("Done!", IntentKind.STOP_SESSION),
     ("stop", IntentKind.STOP_SESSION),
     ("I'm done for today", IntentKind.STOP_SESSION),
+    ("I'm done with my homework", IntentKind.STOP_SESSION),
+    ("done with Q1, now Q2", IntentKind.OTHER),
     ("hi mom", IntentKind.OTHER),
     ("I'm not working lol", IntentKind.OTHER),
     ("?", IntentKind.OTHER),

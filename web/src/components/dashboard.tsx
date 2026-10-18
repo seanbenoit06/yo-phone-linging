@@ -9,6 +9,12 @@ export function duration(seconds: number) {
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}`;
 }
 
+/** Big-number stats: seconds under 2 minutes (so a short session isn't "0 min"), whole minutes after. */
+export function statAmount(seconds: number) {
+  const value = Math.max(0, Math.floor(seconds));
+  return value < 120 ? { amount: value, unit: 'sec' } : { amount: Math.floor(value / 60), unit: 'min' };
+}
+
 export function timeLabel(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
@@ -104,7 +110,9 @@ export function PromiseCard({ promise }: { promise: string }) {
 export function StatsCard({ state }: { state: State }) {
   const total = state.stats.focused_secs + state.stats.distracted_secs;
   const percent = total ? Math.round(state.stats.focused_secs / total * 100) : 0;
-  return <section className="card stats-card"><div className="card-title-row"><h3 className="section-label">YOUR DAY, SO FAR</h3><Sparkles size={18} className="muted" /></div><div className="stat-featured"><span className="stat-number">{Math.floor(state.stats.focused_secs / 60)}</span><span>min focused</span></div><div className="focus-visual" aria-hidden="true">{Array.from({ length: 26 }, (_, index) => <i key={index} className={index < Math.round(percent * .26) ? 'filled' : ''} style={{ height: `${20 + ((index * 13) % 30)}px` }} />)}</div><p className="stats-note">{total ? `${percent}% of your time, well spent.` : 'Make a little room for progress.'}</p><div className="small-stats"><div><strong>{Math.floor(state.stats.distracted_secs / 60)}</strong><span>min distracted</span></div><div><strong>{state.stats.calls_made}</strong><span>calls</span></div><div><strong>{state.stats.texts_sent}</strong><span>texts</span></div></div></section>;
+  const focused = statAmount(state.stats.focused_secs);
+  const distracted = statAmount(state.stats.distracted_secs);
+  return <section className="card stats-card"><div className="card-title-row"><h3 className="section-label">YOUR DAY, SO FAR</h3><Sparkles size={18} className="muted" /></div><div className="stat-featured"><span className="stat-number">{focused.amount}</span><span>{focused.unit} focused</span></div><div className="focus-visual" aria-hidden="true">{Array.from({ length: 26 }, (_, index) => <i key={index} className={index < Math.round(percent * .26) ? 'filled' : ''} style={{ height: `${20 + ((index * 13) % 30)}px` }} />)}</div><p className="stats-note">{total ? `${percent}% of your time, well spent.` : 'Make a little room for progress.'}</p><div className="small-stats"><div><strong>{distracted.amount}</strong><span>{distracted.unit} distracted</span></div><div><strong>{state.stats.calls_made}</strong><span>calls</span></div><div><strong>{state.stats.texts_sent}</strong><span>texts</span></div></div></section>;
 }
 
 export function MoodMeter({ state, theme }: { state: State; theme: Theme }) {

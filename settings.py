@@ -20,6 +20,7 @@ SNITCH_AFTER_MISSED_CALLS = 1                  # this many ignored calls → cal
 def apply_demo_mode(on):
     """Set DEMO_MODE and recompute the timings that depend on it."""
     global DEMO_MODE, DETECT_EVERY_SECS, TEXT_AFTER_DISTRACTED_SECS, CALL_AFTER_DISTRACTED_SECS, CALLBACK_AFTER_SECS
+    global POST_CALL_GRACE_SECS
     DEMO_MODE = bool(on)
 
     def pick(demo, real):
@@ -29,6 +30,9 @@ def apply_demo_mode(on):
     TEXT_AFTER_DISTRACTED_SECS = pick(10, 2 * 60)  # distracted this long → iMessage "?"
     CALL_AFTER_DISTRACTED_SECS = pick(25, 5 * 60)  # distracted this long → phone call
     CALLBACK_AFTER_SECS = pick(45, 5 * 60)        # after a promise on the call → call back
+    # After an answered call, a new distraction streak can't start for this long, so the TikTok tab
+    # left open during the call (or the phone you just talked on) doesn't restart the ladder.
+    POST_CALL_GRACE_SECS = pick(20, 60)
 
 
 apply_demo_mode(os.getenv("DEMO_MODE", "0") == "1")
