@@ -84,10 +84,18 @@ Right column (stacks under the main column below ~1200 px):
 A list of all `call_ended` events (newest first): call type, time, answered or not, duration,
 promise, excuse, and the full transcript. Empty state: "No calls yet. Mom is being patient."
 
-### Tasks (placeholder, no API yet)
-Three "coming soon" cards: **Canvas**, **Trello**, **Google Calendar**, each with one line:
-"Mom will know your assignments / cards / deadlines". A disabled **Connect** button each.
-Later, clicking a task will start a session with it, through the same `POST /api/session/start`.
+### Tasks
+- A list from `GET /api/tasks`, sorted by `due_at` (soonest first), grouped as **Overdue**, **Today**,
+  **This week**, **Later**. Each row: `context` as a colored pill (e.g. `MATH 208`), `title`,
+  relative due time ("due tomorrow 11:59 PM"), points if present, an **Open** link (`url`, new tab),
+  and a **Start with Mom** button.
+- **Start with Mom** opens an inline picker: **30 min**, **1 hour**, **2 hours**, **Until due**.
+  It then sends `POST /api/session/start` with `{ "goal": "{context} {title}", "until": <now + choice, or due_at> }`
+  and switches to Today.
+- A source status line on top from `sources` (e.g. "Canvas · synced 2 min ago", or the error message).
+- **Trello** and **Google Calendar** stay as "coming soon" cards with a disabled **Connect** button.
+- The Today view's idle hero card also shows the 3 soonest tasks as chips under the example chips.
+  Clicking one opens the same duration picker.
 
 ### Settings
 - **Theme picker** (section 5), saved in `localStorage`.
@@ -169,6 +177,22 @@ interface Event {
   transcript: { role: "agent" | "user"; message: string; time_in_call_secs: number }[] }`
 - `error`: `{ source, message }`
 
+### `GET /api/tasks` → `{ tasks: Task[], sources: Record<string, SourceStatus> }`
+Fetch on load and every **60 s** (the server caches the sources for a few minutes).
+
+```ts
+interface Task {
+  id: string;              // "canvas:assignment:123"
+  source: "canvas" | "trello" | "calendar";
+  title: string;           // "Week 3 Conceptual Problems"
+  context: string;         // short course / board name: "MATH 208"
+  due_at: string | null;   // ISO 8601
+  url: string | null;
+  points: number | null;
+}
+interface SourceStatus { status: "ok" | "error" | "off"; synced_at: string | null; message?: string }
+```
+
 ### Commands
 All return `200 { "ok": true, ... }` or `4xx { "ok": false, "error": "readable message" }`.
 Commands go through the same path as iMessage, so Mom also texts her usual reply.
@@ -242,6 +266,12 @@ Use this real transcript (from a live test call) for the mock `call_ended`:
   ]
 }
 ```
+
+Mock `GET /api/tasks` with realistic UW courses, for example (due dates relative to "now"):
+`MATH 208` "Week 3 Conceptual Problems" (5 pts, due in 2 days), `INFO 200` "Knowledge Checkpoint Quiz"
+(50 pts, due tomorrow 3 PM), `PSYCH 210` "Week 3 Writing Assignment" (10 pts, due tomorrow 11:59 PM),
+`INFO 200` "Intro + Part I Study Guide" (20 pts, due in 5 days), and one overdue item.
+`sources`: `{ "canvas": { "status": "ok", "synced_at": <now - 2 min> } }`.
 
 Mom's real text messages, for mock `text_out` events:
 `OK Jay. CSE homework until 9:00 PM. Mom is watching. 👀` · `?` ·

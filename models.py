@@ -57,6 +57,20 @@ class Intent:
     until: Optional[datetime] = None   # START_SESSION only, local time
 
 
+# ---------- tasks/ (Canvas now; Trello / Calendar later) ----------
+
+@dataclass
+class Task:
+    """Something the user has to do, from an outside source."""
+    id: str                          # stable and unique across sources, e.g. "canvas:assignment:123"
+    source: str                      # "canvas" | "trello" | "calendar"
+    title: str                       # e.g. "Week 3 Conceptual Problems"
+    context: str                     # short course / board name, e.g. "MATH 208"
+    due_at: Optional[datetime] = None  # timezone-aware; None if there is no deadline
+    url: Optional[str] = None        # link to open the task in its source
+    points: Optional[float] = None   # Canvas points possible, if any
+
+
 # ---------- caller.py ----------
 
 class CallType(str, Enum):

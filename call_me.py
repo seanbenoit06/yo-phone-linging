@@ -5,6 +5,7 @@ Usage:
     python call_me.py
     python call_me.py --goal "CSE homework" --distraction "TikTok"
     python call_me.py --dry-run      # print the dynamic variables instead of calling
+    python call_me.py --to +12065551234 --name Alex   # call someone else (they must agree first)
 """
 
 import argparse
@@ -41,6 +42,8 @@ def parse_args():
     parser.add_argument("--goal", default="CSE homework", help='what you should be doing (default: "CSE homework")')
     parser.add_argument("--distraction", default="TikTok", help='what you are doing instead (default: "TikTok")')
     parser.add_argument("--dry-run", action="store_true", help="print the call instead of placing it")
+    parser.add_argument("--to", help="E.164 number to call instead of MY_PHONE_NUMBER (they must agree first)")
+    parser.add_argument("--name", help="name Mom uses instead of USER_NAME")
     return parser.parse_args()
 
 
@@ -97,20 +100,23 @@ def main():
         "USER_NAME",
     ])
 
-    if not E164_PATTERN.match(config["MY_PHONE_NUMBER"]):
-        fail("MY_PHONE_NUMBER must be E.164: a +, the country code, then digits only (e.g. +12065551234).")
+    to_number = args.to or config["MY_PHONE_NUMBER"]
+    name = args.name or config["USER_NAME"]
+    if not E164_PATTERN.match(to_number):
+        source = "--to" if args.to else "MY_PHONE_NUMBER"
+        fail(f"{source} must be E.164: a +, the country code, then digits only (e.g. +12065551234).")
     if config["ELEVENLABS_PHONE_NUMBER_ID"].startswith("+"):
         fail(
             "ELEVENLABS_PHONE_NUMBER_ID should be the phone_number_id, not the phone number itself.\n"
             "   Run `python list_numbers.py` to find it."
         )
 
-    print(f"📞 Asking ElevenLabs to call {mask_phone(config['MY_PHONE_NUMBER'])}")
+    print(f"📞 Asking ElevenLabs to call {name} at {mask_phone(to_number)}")
     print(
         f"   goal={args.goal!r}  distraction={args.distraction!r}  "
         f"minutes_distracted={MINUTES_DISTRACTED!r}  ringing_timeout={RINGING_TIMEOUT_SECS}s"
     )
-    variables = build_dynamic_variables(config["USER_NAME"], args.goal, args.distraction, MINUTES_DISTRACTED)
+    variables = build_dynamic_variables(name, args.goal, args.distraction, MINUTES_DISTRACTED)
 
     if args.dry_run:
         print("\n(dry run, no call placed) dynamic variables:")
@@ -118,7 +124,7 @@ def main():
         return
 
     try:
-        response = place_call(config, config["MY_PHONE_NUMBER"], variables)
+        response = place_call(config, to_number, variables)
     except ApiError as err:
         if err.status_code is None:
             fail(f"{err}\n   The call may still have been placed. Check ElevenLabs → Conversations before retrying.")

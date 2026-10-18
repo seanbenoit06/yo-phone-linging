@@ -36,6 +36,7 @@ so **only edit the files you own** and talk to other modules only through the ty
 | `detector.py` | detector session | Read the active window / tab, decide on-task vs distracted. |
 | `webcam.py` | webcam session | Phone-in-hand detection with Perceptron. |
 | `agent/` | agent-prompt session | ElevenLabs agent prompt, first message, dashboard setup. |
+| `tasks/` | canvas session | Task sources (`tasks/canvas.py` now; Trello / Calendar later) → `list[Task]`. |
 | `web/` | Codex | Local dashboard (React + Vite). Spec and API contract: `docs/UI_SPEC.md`. |
 | `api.py` | core | Local HTTP API for the dashboard (`127.0.0.1:8765`), served from `main.py`. |
 
@@ -55,6 +56,10 @@ classify(activity: Activity, goal: str) -> Verdict   # < 5s, never raises (UNSUR
 
 # webcam.py
 check() -> Verdict                                   # DISTRACTED + distraction="your phone" when phone in hand
+
+# tasks/__init__.py
+get_tasks() -> tuple[list[Task], dict[str, dict]]    # (tasks sorted by due_at, {"canvas": {"status", "synced_at", "message"}})
+                                                     # cached ~5 min, never raises; a broken source → status "error"
 
 # caller.py
 build_dynamic_variables(user_name, goal, distraction, minutes_distracted,
