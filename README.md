@@ -1,8 +1,10 @@
-# Mom.exe
+# Yo Mom Calling
+
+![Yo Mom Calling: a red rotary phone ringing on a stack of textbooks](docs/images/thumbnail.png)
 
 **It's basically your mom with an API key.**
 
-Mom.exe is an AI accountability agent. It watches you work, texts you when you drift to TikTok, and
+Yo Mom Calling is an AI accountability agent; the app is called **Mom.exe**. It watches you work, texts you when you drift to TikTok, and
 then actually **phone-calls you**. On the call it doesn't just yell: it asks what's blocking you,
 shrinks the task into one five-minute step, gets your promise, texts it back to you, and calls back to check.
 
