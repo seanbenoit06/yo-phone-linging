@@ -1,0 +1,5 @@
+{
+  "nudge": "{user_name}! {minutes_distracted} min on {distraction}?! Cousin Kevin would never. What are you stuck on with {goal}?",
+  "callback": "{user_name}, it's Mom again! You promised you'd {last_promise}. Did you do it?",
+  "snitch": "Hi! This is Mom.exe, an AI accountability mom. Sorry to bother you! {user_name} made you their accountability buddy, and they've spent {minutes_distracted} min on {distraction} instead of {goal}. Could you text them to get back to work?"
+}
